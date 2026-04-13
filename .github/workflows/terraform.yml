@@ -21,7 +21,7 @@ jobs:
 
     permissions:
       id-token: write
-      contents: read
+      contents: write
 
     env:
       AWS_REGION: ap-south-1
@@ -72,17 +72,16 @@ jobs:
       # ✅ Save tfstate back to repo
       - name: Commit tfstate
         if: ${{ github.event.inputs.action == 'apply' }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config --global user.name "github-actions"
           git config --global user.email "github-actions@github.com"
 
-          git add terraform.tfstate terraform.tfstate.backup || true
+          git add terraform.tfstate || true
 
           git commit -m "update terraform state" || echo "No changes to commit"
 
-          git push https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }} HEAD:main
+          git push
+
 
       # ❌ Destroy (simplified & correct)
       - name: Terraform Destroy
