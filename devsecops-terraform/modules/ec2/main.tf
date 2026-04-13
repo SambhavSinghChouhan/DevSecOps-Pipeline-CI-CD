@@ -24,7 +24,7 @@ resource "aws_security_group" "sg" {
 }
 
 resource "aws_instance" "devsecops" {
-  ami           = "ami-0f5ee92e2d63afc18" # Amazon Linux 2 (ap-south-1)
+  ami = "ami-0a7cf821b91bcccbc" # Amazon Linux 2 (ap-south-1)
   instance_type = var.instance_type
   subnet_id     = var.subnet_id
   key_name      = var.key_name
@@ -33,15 +33,15 @@ resource "aws_instance" "devsecops" {
 
   user_data = <<-EOF
 #!/bin/bash
-yum update -y
+apt update -y
 
 # Install Docker
-amazon-linux-extras install docker -y
+apt install -y docker.io
 systemctl start docker
 systemctl enable docker
 
-# Add ec2-user to docker group
-usermod -aG docker ec2-user
+# Add ubuntu user to docker group
+usermod -aG docker ubuntu
 
 # Install Docker Compose (v2 plugin)
 mkdir -p /usr/libexec/docker/cli-plugins
@@ -55,14 +55,18 @@ docker --version
 docker compose version
 
 # Install Trivy
-rpm -ivh https://github.com/aquasecurity/trivy/releases/latest/download/trivy.rpm
+apt install -y wget gnupg lsb-release apt-transport-https
+wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | apt-key add -
+echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | tee /etc/apt/sources.list.d/trivy.list
+apt update -y
+apt install -y trivy
 
 # Install Java (for OWASP Dependency Check)
-yum install java-11-amazon-corretto -y
+apt install -y openjdk-11-jdk
 
 # Create working directory
-mkdir -p /home/ec2-user/app
-chown ec2-user:ec2-user /home/ec2-user/app
+mkdir -p /home/ubuntu/app
+chown ubuntu:ubuntu /home/ubuntu/app
 
 EOF
 
