@@ -82,10 +82,11 @@ jobs:
         if: ${{ github.event.inputs.action == 'destroy' }}
         run: terraform destroy -auto-approve
 
+  ...
   deploy-and-scan:
     runs-on: ubuntu-latest
     needs: terraform
-    if: ${{ github.event.inputs.action == 'apply' }}   # ✅ FIXED
+    if: ${{ github.event.inputs.action == 'apply' }}
 
     permissions:
       id-token: write
@@ -94,6 +95,7 @@ jobs:
     env:
       AWS_REGION: ap-south-1
       EC2_IP: ${{ needs.terraform.outputs.ec2_ip }}
+      BRANCH: ${{ secrets.BRANCH }}   # ✅ ADDED
 
     steps:
       - name: Checkout Repo
@@ -105,9 +107,16 @@ jobs:
           role-to-assume: ${{ secrets.OIDC }}
           aws-region: ${{ env.AWS_REGION }}
 
+      # 🔹 Clone target repo (WITH BRANCH SUPPORT)
       - name: Clone Target Repo
         run: |
-          git clone ${{ secrets.GBLINK }} app
+          if [ -z "$BRANCH" ]; then
+            echo "No branch provided, using default"
+            git clone ${{ secrets.GBLINK }} app
+          else
+            echo "Using branch: $BRANCH"
+            git clone -b $BRANCH ${{ secrets.GBLINK }} app
+          fi
 
       - name: Login to ECR
         run: |
