@@ -27,7 +27,7 @@ jobs:
       AWS_REGION: ap-south-1
 
     outputs:
-      ec2_ip: ${{ steps.tf.outputs.ec2_ip }}   # ✅ OUTPUT EXPOSED
+      ec2_ip: ${{ steps.tf.outputs.ec2_ip }}
 
     steps:
       - name: Checkout Code
@@ -59,16 +59,16 @@ jobs:
         if: ${{ github.event.inputs.action == 'apply' }}
         run: terraform apply -auto-approve tfplan
 
-      # ✅ GET EC2 IP FROM TERRAFORM
       - name: Get EC2 IP
         if: ${{ github.event.inputs.action == 'apply' }}
         id: tf
         run: |
           echo "ec2_ip=$(terraform output -raw ec2_public_ip)" >> $GITHUB_OUTPUT
+
       - name: Print EC2 IP
         if: ${{ github.event.inputs.action == 'apply' }}
-        run: |
-          echo "EC2 IP: ${{ steps.tf.outputs.ec2_ip }}"
+        run: echo "EC2 IP: ${{ steps.tf.outputs.ec2_ip }}"
+
       - name: Commit tfstate
         if: ${{ github.event.inputs.action == 'apply' }}
         run: |
@@ -77,6 +77,7 @@ jobs:
           git add terraform.tfstate || true
           git commit -m "update terraform state" || echo "No changes"
           git push
+
       - name: Terraform Destroy
         if: ${{ github.event.inputs.action == 'destroy' }}
         run: terraform destroy -auto-approve
@@ -94,7 +95,7 @@ jobs:
     env:
       AWS_REGION: ap-south-1
       EC2_IP: ${{ needs.terraform.outputs.ec2_ip }}
-      BRANCH: ${{ secrets.BRANCH }}   # ✅ ADDED
+      BRANCH: ${{ secrets.BRANCH }}
 
     steps:
       - name: Checkout Repo
@@ -106,7 +107,6 @@ jobs:
           role-to-assume: ${{ secrets.OIDC }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # 🔹 Clone target repo (WITH BRANCH SUPPORT)
       - name: Clone Target Repo
         run: |
           if [ -z "$BRANCH" ]; then
@@ -123,7 +123,6 @@ jobs:
           aws ecr get-login-password --region $AWS_REGION \
           | docker login --username AWS --password-stdin $(echo $ECR_URI | cut -d'/' -f1)
 
-      # 🔥 SMART BUILD
       - name: Build Docker Image (Smart)
         run: |
           cd app
@@ -149,29 +148,37 @@ jobs:
 
       - name: Deploy & Scan on EC2
         run: |
-          ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP << 'EOF'
+          ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP << EOF
 
           cd /home/ubuntu/app
           rm -rf *
-          git clone ${{ secrets.GBLINK }} .
+
+          if [ -z "$BRANCH" ]; then
+            git clone ${{ secrets.GBLINK }} .
+          else
+            git clone -b $BRANCH ${{ secrets.GBLINK }} .
+          fi
 
           docker compose up -d --build
 
-          # 🔹 Get image name
-          IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | head -n 1)
+          IMAGE=\$(docker images --format "{{.Repository}}:{{.Tag}}" | head -n 1)
 
-          # 🔹 Trivy Image Scan
-          trivy image $IMAGE -o trivy-image.txt
-
-          # 🔹 Trivy FS Scan
+          trivy image \$IMAGE -o trivy-image.txt
           trivy fs . -o trivy-fs.txt
 
-          # 🔹 OWASP Dependency Check
+          # ✅ Install Dependency Check if missing
+          if ! command -v dependency-check.sh &> /dev/null; then
+            cd /opt
+            wget https://github.com/jeremylong/DependencyCheck/releases/latest/download/dependency-check-8.4.0-release.zip
+            unzip dependency-check-8.4.0-release.zip
+            ln -s /opt/dependency-check/bin/dependency-check.sh /usr/local/bin/dependency-check.sh
+          fi
+
           mkdir reports
           dependency-check.sh --scan . --out reports
 
-          # 🔹 ZAP DAST
-          docker run -t owasp/zap2docker-stable zap-baseline.py \
+          # ✅ FIXED ZAP IMAGE
+          docker run -t zaproxy/zap-stable zap-baseline.py \
             -t http://localhost \
             -r zap-report.html
 
@@ -185,5 +192,3 @@ jobs:
       - name: Upload Reports to S3
         run: |
           aws s3 cp . s3://your-bucket-name/ --recursive
-
-          
