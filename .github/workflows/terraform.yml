@@ -158,15 +158,12 @@ jobs:
 
           IMAGE=\$(docker images --format "{{.Repository}}:{{.Tag}}" | head -n 1)
 
-          # ✅ CENTRAL REPORT FOLDER
           REPORT_DIR=/home/ubuntu/app/reports
           mkdir -p \$REPORT_DIR
 
-          # ✅ TRIVY
           trivy image \$IMAGE -o \$REPORT_DIR/trivy-image.txt || true
           trivy fs . -o \$REPORT_DIR/trivy-fs.txt || true
 
-          # ✅ INSTALL DEPENDENCY CHECK
           if ! command -v dependency-check.sh &> /dev/null; then
             cd /opt
             wget https://github.com/jeremylong/DependencyCheck/releases/latest/download/dependency-check-8.4.0-release.zip
@@ -176,24 +173,21 @@ jobs:
 
           dependency-check.sh --scan . --out \$REPORT_DIR || true
 
-          # ✅ ZAP
           docker run -t zaproxy/zap-stable zap-baseline.py \
             -t http://localhost \
-            -r zap-report.html || true
-
-          mv zap-report.html \$REPORT_DIR/ || true
-
-          # ✅ ENSURE FILES EXIST
-          touch \$REPORT_DIR/trivy-image.txt
-          touch \$REPORT_DIR/trivy-fs.txt
-          touch \$REPORT_DIR/zap-report.html
+            -r \$REPORT_DIR/zap-report.html || true
 
           EOF
 
+      # ✅ FIX: safer fetch (no failures if files missing)
       - name: Fetch Reports
         run: |
-          scp -r -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP:/home/ubuntu/app/reports . || true
+          mkdir -p reports
+          scp -r -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP:/home/ubuntu/app/reports/* reports/ || true
 
-      - name: Upload Reports to S3
-        run: |
-          aws s3 cp reports s3://your-bucket-name/reports/ --recursive
+      # 🔥 NEW: GitHub Artifacts (REPLACES S3)
+      - name: Upload Reports to GitHub Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-reports
+          path: reports
