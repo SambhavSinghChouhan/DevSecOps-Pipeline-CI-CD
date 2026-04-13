@@ -1,0 +1,66 @@
+name: Terraform Infra Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Choose action"
+        required: true
+        type: choice
+        options:
+          - apply
+          - destroy
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write   # REQUIRED for OIDC
+      contents: read
+
+    env:
+      AWS_REGION: ap-south-1
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # ✅ Configure AWS using OIDC
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.OIDC-AWS }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # ✅ Install Terraform
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      # ✅ Init
+      - name: Terraform Init
+        run: terraform init
+
+      # ✅ Validate
+      - name: Terraform Validate
+        run: terraform validate
+
+      # ✅ Plan
+      - name: Terraform Plan
+        if: ${{ github.event.inputs.action == 'apply' }}
+        run: terraform plan -out=tfplan
+
+      # ✅ Apply
+      - name: Terraform Apply
+        if: ${{ github.event.inputs.action == 'apply' }}
+        run: terraform apply -auto-approve tfplan
+
+      # ❌ Destroy Plan
+      - name: Terraform Destroy Plan
+        if: ${{ github.event.inputs.action == 'destroy' }}
+        run: terraform plan -destroy -out=tfdestroy
+
+      # ❌ Destroy Apply
+      - name: Terraform Destroy Apply
+        if: ${{ github.event.inputs.action == 'destroy' }}
+        run: terraform apply -auto-approve tfdestroy
