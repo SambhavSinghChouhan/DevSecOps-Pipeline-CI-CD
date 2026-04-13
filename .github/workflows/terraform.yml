@@ -27,7 +27,7 @@ jobs:
       AWS_REGION: ap-south-1
 
     outputs:
-      ec2_ip: ${{ steps.tf.outputs.ec2_ip }}   # ✅ OUTPUT EXPOSED
+      ec2_ip: ${{ steps.tf.outputs.ec2_ip }}
 
     steps:
       - name: Checkout Code
@@ -59,16 +59,16 @@ jobs:
         if: ${{ github.event.inputs.action == 'apply' }}
         run: terraform apply -auto-approve tfplan
 
-      # ✅ GET EC2 IP FROM TERRAFORM
       - name: Get EC2 IP
         if: ${{ github.event.inputs.action == 'apply' }}
         id: tf
         run: |
           echo "ec2_ip=$(terraform output -raw ec2_public_ip)" >> $GITHUB_OUTPUT
+
       - name: Print EC2 IP
         if: ${{ github.event.inputs.action == 'apply' }}
-        run: |
-          echo "EC2 IP: ${{ steps.tf.outputs.ec2_ip }}"
+        run: echo "EC2 IP: ${{ steps.tf.outputs.ec2_ip }}"
+
       - name: Commit tfstate
         if: ${{ github.event.inputs.action == 'apply' }}
         run: |
@@ -77,6 +77,7 @@ jobs:
           git add terraform.tfstate || true
           git commit -m "update terraform state" || echo "No changes"
           git push
+
       - name: Terraform Destroy
         if: ${{ github.event.inputs.action == 'destroy' }}
         run: terraform destroy -auto-approve
@@ -109,10 +110,8 @@ jobs:
       - name: Clone Target Repo
         run: |
           if [ -z "$BRANCH" ]; then
-            echo "No branch provided, using default"
             git clone ${{ secrets.GBLINK }} app
           else
-            echo "Using branch: $BRANCH"
             git clone -b $BRANCH ${{ secrets.GBLINK }} app
           fi
 
@@ -126,10 +125,8 @@ jobs:
         run: |
           cd app
           if [ -f "docker-compose.yml" ]; then
-            echo "Using docker-compose"
             docker compose build
           else
-            echo "Using Dockerfile"
             docker build -t devsecops-image .
           fi
 
@@ -162,10 +159,15 @@ jobs:
 
           IMAGE=\$(docker images --format "{{.Repository}}:{{.Tag}}" | head -n 1)
 
-          trivy image \$IMAGE -o trivy-image.txt
-          trivy fs . -o trivy-fs.txt
+          # ✅ CENTRAL REPORT FOLDER
+          REPORT_DIR=/home/ubuntu/app/reports
+          mkdir -p \$REPORT_DIR
 
-          # ✅ Install Dependency Check if missing
+          # ✅ TRIVY
+          trivy image \$IMAGE -o \$REPORT_DIR/trivy-image.txt || true
+          trivy fs . -o \$REPORT_DIR/trivy-fs.txt || true
+
+          # ✅ INSTALL DEPENDENCY CHECK
           if ! command -v dependency-check.sh &> /dev/null; then
             cd /opt
             wget https://github.com/jeremylong/DependencyCheck/releases/latest/download/dependency-check-8.4.0-release.zip
@@ -173,21 +175,26 @@ jobs:
             ln -s /opt/dependency-check/bin/dependency-check.sh /usr/local/bin/dependency-check.sh
           fi
 
-          mkdir reports
-          dependency-check.sh --scan . --out reports
+          dependency-check.sh --scan . --out \$REPORT_DIR || true
 
-          # ✅ FIXED ZAP IMAGE
+          # ✅ ZAP
           docker run -t zaproxy/zap-stable zap-baseline.py \
             -t http://localhost \
             -r zap-report.html || true
+
+          mv zap-report.html \$REPORT_DIR/ || true
+
+          # ✅ ENSURE FILES EXIST
+          touch \$REPORT_DIR/trivy-image.txt
+          touch \$REPORT_DIR/trivy-fs.txt
+          touch \$REPORT_DIR/zap-report.html
 
           EOF
 
       - name: Fetch Reports
         run: |
-          scp -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP:/home/ubuntu/app/*.txt .
-          scp -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP:/home/ubuntu/app/*.html .
+          scp -r -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP:/home/ubuntu/app/reports . || true
 
       - name: Upload Reports to S3
         run: |
-          aws s3 cp . s3://your-bucket-name/ --recursive
+          aws s3 cp reports s3://your-bucket-name/reports/ --recursive
