@@ -68,6 +68,22 @@ jobs:
         if: ${{ github.event.inputs.action == 'apply' }}
         run: terraform apply -auto-approve tfplan
 
+
+      # ✅ Save tfstate back to repo
+      - name: Commit tfstate
+        if: ${{ github.event.inputs.action == 'apply' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
+
+          git add terraform.tfstate terraform.tfstate.backup || true
+
+          git commit -m "update terraform state" || echo "No changes to commit"
+
+          git push https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }} HEAD:main
+
       # ❌ Destroy (simplified & correct)
       - name: Terraform Destroy
         if: ${{ github.event.inputs.action == 'destroy' }}
