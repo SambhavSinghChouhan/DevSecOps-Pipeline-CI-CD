@@ -27,7 +27,7 @@ jobs:
       AWS_REGION: ap-south-1
 
     outputs:
-      ec2_ip: ${{ steps.tf.outputs.ec2_ip }}   # ✅ OUTPUT EXPOSED
+      ec2_ip: ${{ steps.tf.outputs.ec2_ip }}
 
     steps:
       - name: Checkout Code
@@ -59,7 +59,6 @@ jobs:
         if: ${{ github.event.inputs.action == 'apply' }}
         run: terraform apply -auto-approve tfplan
 
-      # ✅ GET EC2 IP FROM TERRAFORM
       - name: Get EC2 IP
         if: ${{ github.event.inputs.action == 'apply' }}
         id: tf
@@ -68,8 +67,7 @@ jobs:
 
       - name: Print EC2 IP
         if: ${{ github.event.inputs.action == 'apply' }}
-        run: |
-          echo "EC2 IP: ${{ steps.tf.outputs.ec2_ip }}"
+        run: echo "EC2 IP: ${{ steps.tf.outputs.ec2_ip }}"
 
       - name: Commit tfstate
         if: ${{ github.event.inputs.action == 'apply' }}
@@ -84,10 +82,10 @@ jobs:
         if: ${{ github.event.inputs.action == 'destroy' }}
         run: terraform destroy -auto-approve
 
-  # 🔥 FULL DEVSECOPS PIPELINE
   deploy-and-scan:
     runs-on: ubuntu-latest
     needs: terraform
+    if: ${{ github.event.inputs.action == 'apply' }}   # ✅ FIXED
 
     permissions:
       id-token: write
@@ -95,7 +93,7 @@ jobs:
 
     env:
       AWS_REGION: ap-south-1
-      EC2_IP: ${{ needs.terraform.outputs.ec2_ip }}   # ✅ USING TERRAFORM OUTPUT
+      EC2_IP: ${{ needs.terraform.outputs.ec2_ip }}
 
     steps:
       - name: Checkout Repo
@@ -107,70 +105,75 @@ jobs:
           role-to-assume: ${{ secrets.OIDC }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # 🔹 Clone target repo
       - name: Clone Target Repo
         run: |
           git clone ${{ secrets.GBLINK }} app
 
-      # 🔹 Login to ECR
       - name: Login to ECR
         run: |
           ECR_URI=$(aws ecr describe-repositories --query 'repositories[0].repositoryUri' --output text)
           aws ecr get-login-password --region $AWS_REGION \
           | docker login --username AWS --password-stdin $(echo $ECR_URI | cut -d'/' -f1)
 
-      # 🔹 Build image
-      - name: Build Docker Image
+      # 🔥 SMART BUILD
+      - name: Build Docker Image (Smart)
         run: |
           cd app
-          docker build -t devsecops-image .
+          if [ -f "docker-compose.yml" ]; then
+            echo "Using docker-compose"
+            docker compose build
+          else
+            echo "Using Dockerfile"
+            docker build -t devsecops-image .
+          fi
 
-      # 🔹 Push to ECR
       - name: Push to ECR
         run: |
           ECR_URI=$(aws ecr describe-repositories --query 'repositories[0].repositoryUri' --output text)
-          docker tag devsecops-image:latest $ECR_URI:latest
+          IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | head -n 1)
+          docker tag $IMAGE $ECR_URI:latest
           docker push $ECR_URI:latest
 
-      # 🔹 Setup SSH
       - name: Setup SSH
         run: |
           echo "${{ secrets.KEY }}" > key.pem
           chmod 400 key.pem
 
-      # 🔥 DEPLOY + SCAN
       - name: Deploy & Scan on EC2
         run: |
           ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP << 'EOF'
 
           cd /home/ubuntu/app
           rm -rf *
-
           git clone ${{ secrets.GBLINK }} .
 
-          docker compose up -d
+          docker compose up -d --build
 
-          # Trivy
-          trivy fs . -o trivy-report.txt
+          # 🔹 Get image name
+          IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | head -n 1)
 
-          # OWASP Dependency Check
+          # 🔹 Trivy Image Scan
+          trivy image $IMAGE -o trivy-image.txt
+
+          # 🔹 Trivy FS Scan
+          trivy fs . -o trivy-fs.txt
+
+          # 🔹 OWASP Dependency Check
           mkdir reports
           dependency-check.sh --scan . --out reports
 
-          # ZAP DAST
+          # 🔹 ZAP DAST
           docker run -t owasp/zap2docker-stable zap-baseline.py \
             -t http://localhost \
             -r zap-report.html
 
           EOF
 
-      # 🔹 Fetch reports
       - name: Fetch Reports
         run: |
           scp -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP:/home/ubuntu/app/*.txt .
           scp -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP:/home/ubuntu/app/*.html .
 
-      # 🔹 Upload to S3
       - name: Upload Reports to S3
         run: |
           aws s3 cp . s3://your-bucket-name/ --recursive
