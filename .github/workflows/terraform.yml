@@ -15,16 +15,25 @@ jobs:
   terraform:
     runs-on: ubuntu-latest
 
+    defaults:
+      run:
+        working-directory: devsecops-terraform   # ✅ FIXED PATH
+
     permissions:
-      id-token: write   # REQUIRED for OIDC
+      id-token: write
       contents: read
 
     env:
       AWS_REGION: ap-south-1
 
     steps:
+      # ✅ Checkout repo
       - name: Checkout Code
         uses: actions/checkout@v4
+
+      # ✅ Debug (optional but useful)
+      - name: Show files
+        run: ls -R
 
       # ✅ Configure AWS using OIDC
       - name: Configure AWS Credentials (OIDC)
@@ -33,9 +42,13 @@ jobs:
           role-to-assume: ${{ secrets.OIDC }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # ✅ Install Terraform
+      # ✅ Setup Terraform
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
+
+      # ✅ Format check (pro)
+      - name: Terraform Format Check
+        run: terraform fmt -check
 
       # ✅ Init
       - name: Terraform Init
@@ -45,7 +58,7 @@ jobs:
       - name: Terraform Validate
         run: terraform validate
 
-      # ✅ Plan
+      # ✅ Plan (Apply flow)
       - name: Terraform Plan
         if: ${{ github.event.inputs.action == 'apply' }}
         run: terraform plan -out=tfplan
@@ -55,12 +68,7 @@ jobs:
         if: ${{ github.event.inputs.action == 'apply' }}
         run: terraform apply -auto-approve tfplan
 
-      # ❌ Destroy Plan
-      - name: Terraform Destroy Plan
+      # ❌ Destroy (simplified & correct)
+      - name: Terraform Destroy
         if: ${{ github.event.inputs.action == 'destroy' }}
-        run: terraform plan -destroy -out=tfdestroy
-
-      # ❌ Destroy Apply
-      - name: Terraform Destroy Apply
-        if: ${{ github.event.inputs.action == 'destroy' }}
-        run: terraform apply -auto-approve tfdestroy
+        run: terraform destroy -auto-approve
