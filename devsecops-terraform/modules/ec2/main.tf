@@ -24,12 +24,17 @@ resource "aws_security_group" "sg" {
 }
 
 resource "aws_instance" "devsecops" {
-  ami = "ami-0a7cf821b91bcccbc" # Amazon Linux 2 (ap-south-1)
+  ami = "ami-0a7cf821b91bcccbc" 
   instance_type = var.instance_type
   subnet_id     = var.subnet_id
   key_name      = var.key_name
 
   vpc_security_group_ids = [aws_security_group.sg.id]
+
+   root_block_device {
+    volume_size = 30
+    volume_type = "gp3"
+  }
 
   user_data = <<-EOF
 #!/bin/bash
