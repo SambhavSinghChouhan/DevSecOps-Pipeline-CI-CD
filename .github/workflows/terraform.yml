@@ -1,3 +1,4 @@
+
 name: Terraform Infra Pipeline
 
 on:
@@ -113,13 +114,11 @@ jobs:
           else
             git clone -b $BRANCH ${{ secrets.GBLINK }} app
           fi
-
       - name: Login to ECR
         run: |
           ECR_URI=$(aws ecr describe-repositories --query 'repositories[0].repositoryUri' --output text)
           aws ecr get-login-password --region $AWS_REGION \
           | docker login --username AWS --password-stdin $(echo $ECR_URI | cut -d'/' -f1)
-
       - name: Build Docker Image (Smart)
         run: |
           cd app
@@ -128,44 +127,34 @@ jobs:
           else
             docker build -t devsecops-image .
           fi
-
       - name: Push to ECR
         run: |
           ECR_URI=$(aws ecr describe-repositories --query 'repositories[0].repositoryUri' --output text)
           IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | head -n 1)
           docker tag $IMAGE $ECR_URI:latest
           docker push $ECR_URI:latest
-
-            - name: Deploy & Scan on EC2
+      - name: Setup SSH
+        run: |
+          echo "${{ secrets.KEY }}" > key.pem
+          chmod 400 key.pem
+      - name: Deploy & Scan on EC2
         run: |
           ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP << EOF
-
           cd /home/ubuntu/app
           rm -rf *
-
           if [ -z "$BRANCH" ]; then
             git clone ${{ secrets.GBLINK }} .
           else
             git clone -b $BRANCH ${{ secrets.GBLINK }} .
           fi
-
           docker compose up -d --build
-
           IMAGE=\$(docker images --format "{{.Repository}}:{{.Tag}}" | head -n 1)
-
           REPORT_DIR=/home/ubuntu/app/reports
           mkdir -p \$REPORT_DIR
-
-          # =========================
-          # TRIVY (WORKING)
-          # =========================
           trivy image \$IMAGE -o \$REPORT_DIR/trivy-image.txt || true
           trivy fs . -o \$REPORT_DIR/trivy-fs.txt || true
 
-          # =========================
-          # OWASP DEPENDENCY CHECK (FIXED INSTALL)
-          # =========================
-          cd /opt
+          cd/opt
           if [ ! -d "dependency-check" ]; then
             wget -q https://github.com/jeremylong/DependencyCheck/releases/latest/download/dependency-check-8.4.0-release.zip
             unzip -o dependency-check-8.4.0-release.zip -d dependency-check
@@ -178,32 +167,30 @@ jobs:
             --format ALL \
             --out \$REPORT_DIR || true
 
-          # =========================
-          # ZAP FIX (IMPORTANT)
-          # =========================
-          docker pull zaproxy/zap-stable
+            # ZAP FIX (IMPORTANT)
 
+          docker pull zaproxy/zap-stable
           docker run --rm zaproxy/zap-stable zap-baseline.py \
             -t http://localhost \
             -r zap-report.html || true
 
           mv zap-report.html \$REPORT_DIR/ || true
 
-          # =========================
           # ENSURE FILES ALWAYS EXIST
-          # =========================
+
           touch \$REPORT_DIR/trivy-image.txt
           touch \$REPORT_DIR/trivy-fs.txt
           touch \$REPORT_DIR/zap-report.html
 
-          EOF
 
+
+          
+          EOF
       # ✅ FIX: safer fetch (no failures if files missing)
       - name: Fetch Reports
         run: |
           mkdir -p reports
           scp -r -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP:/home/ubuntu/app/reports/* reports/ || true
-
       # 🔥 NEW: GitHub Artifacts (REPLACES S3)
       - name: Upload Reports to GitHub Artifacts
         uses: actions/upload-artifact@v4
