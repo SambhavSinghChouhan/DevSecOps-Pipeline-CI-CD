@@ -201,28 +201,36 @@ jobs:
           mkdir -p reports
 
           echo "========================"
-          echo "BUILDING DOCKER IMAGE"
+          echo "LOGIN TO ECR"
           echo "========================"
 
-          if [ -f "Dockerfile" ]; then
-            docker build -t app:latest .
-          else
-            echo "Dockerfile missing"
-            exit 1
-          fi
+          aws ecr get-login-password --region ap-south-1 | \
+          docker login --username AWS --password-stdin $(aws sts get-caller-identity --query Account --output text).dkr.ecr.ap-south-1.amazonaws.com
 
           echo "========================"
-          echo "TRIVY SCANS"
+          echo "PULL IMAGE FROM ECR"
           echo "========================"
 
-          trivy image app:latest -f json -o reports/trivy-image.json || true
-          trivy image app:latest -f table -o reports/trivy-image.txt || true
+          ECR_URI=$(aws ecr describe-repositories --query 'repositories[0].repositoryUri' --output text)
+
+          docker pull $ECR_URI:latest
+
+          echo "========================"
+          echo "TRIVY IMAGE SCAN (FROM ECR)"
+          echo "========================"
+
+          trivy image $ECR_URI:latest -f json -o reports/trivy-image.json || true
+          trivy image $ECR_URI:latest -f table -o reports/trivy-image.txt || true
+
+          echo "========================"
+          echo "TRIVY FILE SYSTEM SCAN"
+          echo "========================"
 
           trivy fs . -f json -o reports/trivy-fs.json || true
           trivy fs . -f table -o reports/trivy-fs.txt || true
 
           echo "========================"
-          echo "DEPENDENCY CHECK (HTML + TXT)"
+          echo "DEPENDENCY CHECK"
           echo "========================"
 
           /opt/dependency-check/bin/dependency-check.sh \
@@ -231,13 +239,17 @@ jobs:
             --out reports/dependency-check || true
 
           ls -lah reports
-          EOF 
+          EOF
 
       - name: Deploy + ZAP Scan
         run: |
           ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP << 'EOF'
 
           cd /home/ubuntu/app
+
+          echo "========================"
+          echo "STARTING DOCKER COMPOSE"
+          echo "========================"
 
           docker-compose down || true
           docker-compose up -d --build
@@ -247,12 +259,10 @@ jobs:
           mkdir -p reports/zap
 
           echo "========================"
-          echo "DETECTING FRONTEND PORT"
+          echo "ZAP SCANNING FRONTEND (5173)"
           echo "========================"
 
           FRONTEND_PORT=5173
-
-          echo "Using port: $FRONTEND_PORT"
 
           docker run --rm \
             -v /home/ubuntu/app/reports:/zap/wrk \
@@ -265,7 +275,7 @@ jobs:
             --auto || true
 
           ls -lah reports/zap
-          EOF  
+          EOF 
 
       - name: Debug Reports
         run: |
