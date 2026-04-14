@@ -14,6 +14,7 @@ on:
 jobs:
   terraform:
     runs-on: ubuntu-latest
+
     defaults:
       run:
         working-directory: devsecops-terraform
@@ -26,35 +27,59 @@ jobs:
       AWS_REGION: ap-south-1
 
     outputs:
-      ec2_ip: ${{ steps.tf.outputs.ec2_ip }}
+      ec2_ip: ${{ steps.tf.outputs.ec2_ip }}   # ✅ OUTPUT EXPOSED
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-      - run: ls -R
+      - name: Show files
+        run: ls -R
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.OIDC }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - uses: hashicorp/setup-terraform@v3
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
 
-      - run: terraform init
-      - run: terraform validate
+      - name: Terraform Init
+        run: terraform init
 
-      - run: terraform plan -out=tfplan
+      - name: Terraform Validate
+        run: terraform validate
+
+      - name: Terraform Plan
         if: ${{ github.event.inputs.action == 'apply' }}
+        run: terraform plan -out=tfplan
 
-      - run: terraform apply -auto-approve tfplan
+      - name: Terraform Apply
         if: ${{ github.event.inputs.action == 'apply' }}
+        run: terraform apply -auto-approve tfplan
 
-      - id: tf
+      # ✅ GET EC2 IP FROM TERRAFORM
+      - name: Get EC2 IP
         if: ${{ github.event.inputs.action == 'apply' }}
-        run: echo "ec2_ip=$(terraform output -raw ec2_public_ip)" >> $GITHUB_OUTPUT
-
-      - run: echo "EC2 IP: ${{ steps.tf.outputs.ec2_ip }}"
+        id: tf
+        run: |
+          echo "ec2_ip=$(terraform output -raw ec2_public_ip)" >> $GITHUB_OUTPUT
+      - name: Print EC2 IP
         if: ${{ github.event.inputs.action == 'apply' }}
+        run: |
+          echo "EC2 IP: ${{ steps.tf.outputs.ec2_ip }}"
+      - name: Commit tfstate
+        if: ${{ github.event.inputs.action == 'apply' }}
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
+          git add terraform.tfstate || true
+          git commit -m "update terraform state" || echo "No changes"
+          git push
+      - name: Terraform Destroy
+        if: ${{ github.event.inputs.action == 'destroy' }}
+        run: terraform destroy -auto-approve
 
   deploy-and-scan:
     runs-on: ubuntu-latest
