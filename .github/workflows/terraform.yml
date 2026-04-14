@@ -152,13 +152,14 @@ jobs:
           # ------------------------
           # Docker + permissions
           # ------------------------
-          sudo apt install -y docker.io docker-compose-plugin unzip curl wget git
+          sudo apt install -y docker.io unzip curl wget git
           sudo systemctl enable docker
           sudo systemctl start docker
           sudo usermod -aG docker ubuntu || true
 
-          echo "==== INSTALLING DOCKER COMPOSE (FIXED) ===="
-
+          # ------------------------
+          # Docker Compose (FIXED - NO apt plugin)
+          # ------------------------
           sudo curl -SL https://github.com/docker/compose/releases/download/v2.24.6/docker-compose-linux-x86_64 \
             -o /usr/local/bin/docker-compose
 
@@ -186,7 +187,7 @@ jobs:
             sudo chmod +x /opt/dependency-check/bin/dependency-check.sh
           fi
 
-          echo "==== DONE SETUP ===="
+          echo "==== TOOL INSTALLATION DONE ===="
 
           docker --version
           docker-compose version || true
@@ -194,9 +195,9 @@ jobs:
 
           EOF
 
-      - name: SAST Scan (Trivy + OWASP)
-        run: |    
 
+      - name: SAST Scan (Trivy + OWASP Dependency Check)
+        run: |
           ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP << 'EOF'
 
           cd /home/ubuntu/app
@@ -204,26 +205,35 @@ jobs:
           git clone ${{ secrets.GBLINK }} .
 
           mkdir -p reports
-
           docker build -t app:latest .
 
-          # TRIVY IMAGE
+          # ------------------------
+          # TRIVY IMAGE SCAN
+          # ------------------------
           trivy image app:latest \
             -f json \
             -o reports/trivy-image.json || true
 
-          # TRIVY FILE SYSTEM
+          # ------------------------
+          # TRIVY FILE SYSTEM SCAN
+          # ------------------------
           trivy fs . \
             -f json \
             -o reports/trivy-fs.json || true
 
+          # ------------------------
           # OWASP DEPENDENCY CHECK
+          # ------------------------
           /opt/dependency-check/bin/dependency-check.sh \
             --scan . \
             --format HTML \
             --out reports/dependency-check || true
 
+          echo "SAST SCAN DONE"
+          ls -lah reports
+
           EOF
+
 
       - name: Deploy + ZAP Scan
         run: |
@@ -239,23 +249,30 @@ jobs:
 
           mkdir -p reports/zap
 
+          # ------------------------
+          # OWASP ZAP DAST SCAN
+          # ------------------------
           docker run --rm \
             -v /home/ubuntu/app/reports/zap:/zap/wrk \
             ghcr.io/zaproxy/zaproxy:stable \
             zap-baseline.py \
-            -t http://host.docker.internal:8080 \
+            -t http://localhost:8080 \
             -r /zap/wrk/zap-report.html \
             -x /zap/wrk/zap-report.xml \
             --auto || true
 
+          echo "ZAP DONE"
+          ls -lah reports/zap
+
           EOF
-          
-      # ✅ FIX: safer fetch (no failures if files missing)
+
+
       - name: Fetch Reports
         run: |
           mkdir -p reports
           scp -r -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP:/home/ubuntu/app/reports/* reports/ || true
-      # 🔥 NEW: GitHub Artifacts (REPLACES S3)
+
+
       - name: Upload Reports to GitHub Artifacts
         uses: actions/upload-artifact@v4
         with:
