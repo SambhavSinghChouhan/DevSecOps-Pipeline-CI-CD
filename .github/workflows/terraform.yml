@@ -86,15 +86,22 @@ jobs:
     needs: terraform
     if: ${{ github.event.inputs.action == 'apply' }}
 
+    permissions:
+      id-token: write
+      contents: read
+
     env:
       AWS_REGION: ap-south-1
       EC2_IP: ${{ needs.terraform.outputs.ec2_ip }}
       BRANCH: ${{ secrets.BRANCH }}
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Repo
+        uses: actions/checkout@v4
 
-      - uses: aws-actions/configure-aws-credentials@v4
+
+      - name: Configure AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.OIDC }}
           aws-region: ${{ env.AWS_REGION }}
@@ -107,6 +114,30 @@ jobs:
             git clone -b $BRANCH ${{ secrets.GBLINK }} app
           fi
 
+      - name: Login to ECR
+        run: |
+          ECR_URI=$(aws ecr describe-repositories --query 'repositories[0].repositoryUri' --output text)
+          aws ecr get-login-password --region $AWS_REGION \
+          | docker login --username AWS --password-stdin $(echo $ECR_URI | cut -d'/' -f1)
+
+
+      - name: Build Docker Image (Smart)
+        run: |
+          cd app
+          if [ -f "docker-compose.yml" ]; then
+            docker compose build
+          else
+            docker build -t devsecops-image .
+          fi
+
+
+      - name: Push to ECR
+        run: |
+          ECR_URI=$(aws ecr describe-repositories --query 'repositories[0].repositoryUri' --output text)
+          IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | head -n 1)
+          docker tag $IMAGE $ECR_URI:latest
+          docker push $ECR_URI:latest
+
       - name: Setup SSH
         run: |
           echo "${{ secrets.KEY }}" > key.pem
@@ -115,74 +146,93 @@ jobs:
       # =========================
       # INSTALL TOOLS
       # =========================
-      - name: Install tools
+      - name: Deploy & Scan on EC2
         run: |
           ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP << 'EOF'
           set +e
 
+          echo "========================"
+          echo "INSTALLING ALL TOOLS"
+          echo "========================"
+
           sudo apt update -y
-          sudo apt install -y docker.io unzip curl wget git openjdk-17-jdk
+          sudo apt install -y docker.io unzip curl wget git
           sudo systemctl enable docker
           sudo systemctl start docker
-
           sudo usermod -aG docker ubuntu || true
 
-          # Trivy
+          sudo curl -SL https://github.com/docker/compose/releases/download/v2.24.6/docker-compose-linux-x86_64 \
+            -o /usr/local/bin/docker-compose
+          sudo chmod +x /usr/local/bin/docker-compose
+
           if ! command -v trivy &> /dev/null; then
             wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
-            echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" \
-              | sudo tee /etc/apt/sources.list.d/trivy.list
+            echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/trivy.list
             sudo apt update -y
             sudo apt install -y trivy
           fi
 
-          # Dependency Check FIXED
-          cd /opt
-          sudo rm -rf dependency-check
-          sudo wget -q https://github.com/jeremylong/DependencyCheck/releases/download/v8.4.0/dependency-check-8.4.0-release.zip
-          sudo unzip -o dependency-check-8.4.0-release.zip
-          sudo mv dependency-check /opt/dependency-check
-          sudo chmod +x /opt/dependency-check/bin/dependency-check.sh
+          sudo apt install -y openjdk-17-jdk
 
+          if [ ! -d "/opt/dependency-check" ]; then
+            cd /opt
+            sudo rm -rf dependency-check
+            sudo wget -q https://github.com/jeremylong/DependencyCheck/releases/download/v8.4.0/dependency-check-8.4.0-release.zip
+            sudo unzip -o dependency-check-8.4.0-release.zip
+            sudo mv dependency-check /opt/dependency-check
+            sudo chmod +x /opt/dependency-check/bin/dependency-check.sh
+          fi
+
+          docker --version
+          trivy --version || true
           EOF
 
-      # =========================
-      # SAST SCAN
-      # =========================
-      - name: SAST Scan
+      - name: SAST Scan (Trivy + OWASP Dependency Check)
         run: |
           ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP << 'EOF'
           set +e
 
-          rm -rf /home/ubuntu/app
-          git clone ${{ secrets.GBLINK }} /home/ubuntu/app
+          mkdir -p /home/ubuntu/app
+          cd /home/ubuntu/app || exit 1
+          rm -rf *
 
-          cd /home/ubuntu/app
+          git clone ${{ secrets.GBLINK }} .
+
           mkdir -p reports
 
-          # Build image safely
-          if [ -f Dockerfile ]; then
+          echo "========================"
+          echo "BUILDING DOCKER IMAGE"
+          echo "========================"
+
+          if [ -f "Dockerfile" ]; then
             docker build -t app:latest .
+          else
+            echo "Dockerfile missing"
+            exit 1
           fi
 
-          # TRIVY (JSON + TXT)
+          echo "========================"
+          echo "TRIVY SCANS"
+          echo "========================"
+
           trivy image app:latest -f json -o reports/trivy-image.json || true
           trivy image app:latest -f table -o reports/trivy-image.txt || true
 
           trivy fs . -f json -o reports/trivy-fs.json || true
           trivy fs . -f table -o reports/trivy-fs.txt || true
 
-          # Dependency Check (HTML + TEXT)
+          echo "========================"
+          echo "DEPENDENCY CHECK (HTML + TXT)"
+          echo "========================"
+
           /opt/dependency-check/bin/dependency-check.sh \
             --scan . \
             --format ALL \
             --out reports/dependency-check || true
 
-          EOF
+          ls -lah reports
+          EOF 
 
-      # =========================
-      # DEPLOY + ZAP
-      # =========================
       - name: Deploy + ZAP Scan
         run: |
           ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP << 'EOF'
@@ -196,33 +246,39 @@ jobs:
 
           mkdir -p reports/zap
 
-          # FIXED PORT → frontend 5173
+          echo "========================"
+          echo "DETECTING FRONTEND PORT"
+          echo "========================"
+
+          FRONTEND_PORT=5173
+
+          echo "Using port: $FRONTEND_PORT"
+
           docker run --rm \
             -v /home/ubuntu/app/reports:/zap/wrk \
             ghcr.io/zaproxy/zaproxy:stable \
             zap-baseline.py \
-            -t http://localhost:5173 \
+            -t http://localhost:$FRONTEND_PORT \
             -r /zap/wrk/zap/zap-report.html \
             -x /zap/wrk/zap/zap-report.xml \
             -J /zap/wrk/zap/zap-report.json \
             --auto || true
 
-          EOF
+          ls -lah reports/zap
+          EOF  
 
-      # =========================
-      # FETCH REPORTS
-      # =========================
+      - name: Debug Reports
+        run: |
+          ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP "ls -R /home/ubuntu/app/reports || true"
+
       - name: Fetch Reports
         run: |
           mkdir -p reports
-          scp -r -o StrictHostKeyChecking=no -i key.pem \
-          ubuntu@$EC2_IP:/home/ubuntu/app/reports/* reports/ || true
+          scp -r -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP:/home/ubuntu/app/reports/* reports/ || true
 
-      # =========================
-      # ARTIFACTS
-      # =========================
-      - name: Upload Reports
+      - name: Upload Reports to GitHub Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: security-reports
           path: reports
+
