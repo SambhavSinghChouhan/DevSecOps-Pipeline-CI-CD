@@ -170,7 +170,7 @@ jobs:
           # OWASP Dependency Check 
 
           if ! command -v dependency-check.sh &> /dev/null; then
-            cd/opt
+            cd /opt
             wget -q https://github.com/jeremylong/DependencyCheck/releases/latest/download/dependency-check-8.4.0-release.zip
             unzip -o dependency-check-8.4.0-release.zip -d dependency-check
             chmod +x dependency-check/bin/dependency-check.sh
