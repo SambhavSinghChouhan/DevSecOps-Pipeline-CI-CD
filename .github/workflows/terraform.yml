@@ -149,22 +149,24 @@ jobs:
       - name: Deploy & Scan on EC2
         run: |
           ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP << 'EOF'
-          set +e
+          set -e   # ❗ fail fast (VERY IMPORTANT)
 
           echo "========================"
           echo "INSTALLING ALL TOOLS"
           echo "========================"
 
           sudo apt update -y
-          sudo apt install -y docker.io unzip curl wget git
+          sudo apt install -y docker.io unzip curl wget git awscli
           sudo systemctl enable docker
           sudo systemctl start docker
           sudo usermod -aG docker ubuntu || true
 
+          # docker-compose
           sudo curl -SL https://github.com/docker/compose/releases/download/v2.24.6/docker-compose-linux-x86_64 \
             -o /usr/local/bin/docker-compose
           sudo chmod +x /usr/local/bin/docker-compose
 
+          # trivy
           if ! command -v trivy &> /dev/null; then
             wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
             echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/trivy.list
@@ -172,11 +174,10 @@ jobs:
             sudo apt install -y trivy
           fi
 
+          # dependency check
           sudo apt install -y openjdk-17-jdk
-
           if [ ! -d "/opt/dependency-check" ]; then
             cd /opt
-            sudo rm -rf dependency-check
             sudo wget -q https://github.com/jeremylong/DependencyCheck/releases/download/v8.4.0/dependency-check-8.4.0-release.zip
             sudo unzip -o dependency-check-8.4.0-release.zip
             sudo mv dependency-check /opt/dependency-check
@@ -184,19 +185,26 @@ jobs:
           fi
 
           docker --version
-          trivy --version || true
+          trivy --version
+          aws --version
           EOF
+
 
       - name: SAST Scan (Trivy + OWASP Dependency Check)
         run: |
           ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP << 'EOF'
-          set +e
+          set -e
 
           mkdir -p /home/ubuntu/app
-          cd /home/ubuntu/app || exit 1
+          cd /home/ubuntu/app
           rm -rf *
 
+          echo "========================"
+          echo "CLONING REPO"
+          echo "========================"
+
           git clone ${{ secrets.GBLINK }} .
+          ls -lah   # ✅ verify files
 
           mkdir -p reports
 
@@ -204,66 +212,89 @@ jobs:
           echo "LOGIN TO ECR"
           echo "========================"
 
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ECR_URI=$(aws ecr describe-repositories --query 'repositories[0].repositoryUri' --output text)
+
           aws ecr get-login-password --region ap-south-1 | \
-          docker login --username AWS --password-stdin $(aws sts get-caller-identity --query Account --output text).dkr.ecr.ap-south-1.amazonaws.com
+          docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.ap-south-1.amazonaws.com
 
           echo "========================"
           echo "PULL IMAGE FROM ECR"
           echo "========================"
 
-          ECR_URI=$(aws ecr describe-repositories --query 'repositories[0].repositoryUri' --output text)
-
           docker pull $ECR_URI:latest
 
           echo "========================"
-          echo "TRIVY IMAGE SCAN (FROM ECR)"
+          echo "TRIVY IMAGE SCAN"
           echo "========================"
 
-          trivy image $ECR_URI:latest -f json -o reports/trivy-image.json || true
-          trivy image $ECR_URI:latest -f table -o reports/trivy-image.txt || true
+          trivy image $ECR_URI:latest -f json -o reports/trivy-image.json
+          trivy image $ECR_URI:latest -f table -o reports/trivy-image.txt
 
           echo "========================"
           echo "TRIVY FILE SYSTEM SCAN"
           echo "========================"
 
-          trivy fs . -f json -o reports/trivy-fs.json || true
-          trivy fs . -f table -o reports/trivy-fs.txt || true
+          trivy fs . -f json -o reports/trivy-fs.json
+          trivy fs . -f table -o reports/trivy-fs.txt
 
           echo "========================"
-          echo "DEPENDENCY CHECK (FIXED)"
+          echo "DEPENDENCY CHECK"
           echo "========================"
 
-          rm -rf /home/ubuntu/dependency-db
           mkdir -p /home/ubuntu/dependency-db
-          mkdir -p /home/ubuntu/reports/dependency-check
 
           /opt/dependency-check/bin/dependency-check.sh \
             --scan . \
             --format ALL \
             --out reports/dependency-check \
             --data /home/ubuntu/dependency-db \
+            --nvdApiKey ${{ secrets.NVD_API_KEY }} \
             --failOnCVSS 0 || true
 
-          ls -lah reports
+          ls -R reports
           EOF
+
 
       - name: Deploy + ZAP Scan
         run: |
           ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP << 'EOF'
-          set +e
+          set -e
 
           cd /home/ubuntu/app
 
-          sudo docker-compose down || true
-          sudo docker-compose up -d --build
+          echo "========================"
+          echo "STARTING APP"
+          echo "========================"
+
+          if [ -f "docker-compose.yml" ]; then
+            sudo docker-compose down || true
+            sudo docker-compose up -d --build
+          else
+            echo "docker-compose.yml NOT FOUND ❌"
+            exit 1
+          fi
+
+          echo "========================"
+          echo "VERIFY CONTAINERS"
+          echo "========================"
+
+          docker ps -a
 
           echo "Waiting for app..."
-          sleep 90
+          sleep 120
+
+          echo "========================"
+          echo "TEST APP"
+          echo "========================"
+
+          curl -I http://localhost:5173 || echo "App still not reachable"
 
           mkdir -p reports/zap
 
-          echo "Testing app connectivity..."
-          curl -I http://localhost:5173 || echo "App not reachable"
+          echo "========================"
+          echo "ZAP SCAN"
+          echo "========================"
 
           docker run --rm \
             -v /home/ubuntu/app/reports:/zap/wrk \
@@ -278,18 +309,20 @@ jobs:
           ls -lah reports/zap
           EOF
 
+
       - name: Debug Reports
         run: |
-          ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP "ls -R /home/ubuntu/app/reports || true"
+          ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP "ls -R /home/ubuntu/app/reports"
+
 
       - name: Fetch Reports
         run: |
           mkdir -p reports
-          scp -r -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP:/home/ubuntu/app/reports/* reports/ || true
+          scp -r -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP:/home/ubuntu/app/reports/* reports/
+
 
       - name: Upload Reports to GitHub Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: security-reports
           path: reports
-
