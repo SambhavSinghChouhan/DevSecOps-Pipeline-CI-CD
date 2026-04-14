@@ -169,8 +169,9 @@ jobs:
           cd /home/ubuntu/app
           /opt/dependency-check/bin/dependency-check.sh \
             --scan . \
-            --format ALL \
-            --out \$REPORT_DIR || true
+            --project "devsecops" \
+            --format HTML \
+            --out \$REPORT_DIR/dependency-check-report || true
 
             # ZAP FIX (IMPORTANT)
 
@@ -182,7 +183,12 @@ jobs:
             zap-baseline.py \
             -t http://localhost:8080 \
             -r /zap/wrk/zap/zap-report.html \
+            -x /zap/wrk/zap/zap-report.xml \
             --auto || true
+
+          
+          # ENSURE FILES EXIST
+          ls -lah $REPORT_DIR
 
  
           EOF
