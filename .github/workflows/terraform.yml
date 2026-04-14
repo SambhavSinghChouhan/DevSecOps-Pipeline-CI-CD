@@ -140,6 +140,7 @@ jobs:
       - name: Deploy & Scan on EC2
         run: |
           ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP << EOF
+          set -e
           cd /home/ubuntu/app
           rm -rf *
           if [ -z "$BRANCH" ]; then
@@ -147,7 +148,13 @@ jobs:
           else
             git clone -b $BRANCH ${{ secrets.GBLINK }} .
           fi
+
+          docker compose down || true
           docker compose up -d --build
+          
+          echo "Waiting for app to start..."
+          sleep 40
+          
           IMAGE=\$(docker images --format "{{.Repository}}:{{.Tag}}" | head -n 1)
           REPORT_DIR=/home/ubuntu/app/reports
           mkdir -p \$REPORT_DIR
@@ -176,9 +183,12 @@ jobs:
             --format HTML \
             --out \$REPORT_DIR/dependency-check-report || true
 
-          if [ -f "\$REPORT_DIR/dependency-check/dependency-check-report.html" ]; then
-            echo "Dependency report generated"
-          fi
+          echo "Checking app health..."
+          for i in {1..10}; do
+            curl -s http://localhost:8080 && break || sleep 10
+          done
+
+          
 
             # ZAP FIX (IMPORTANT)
 
@@ -192,9 +202,11 @@ jobs:
             -r /zap/wrk/zap/zap-report.html \
             -x /zap/wrk/zap/zap-report.xml \
             --auto || true
+            --hook=/dev/null || true
 
           
           # ENSURE FILES EXIST
+          echo "==== REPORTS GENERATED ===="
           ls -lah $REPORT_DIR
           ls -lah \$REPORT_DIR/dependency-check
           ls -lah \$REPORT_DIR/zap
