@@ -186,6 +186,10 @@ jobs:
         run: |
           ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP << 'EOF'
 
+          set +e
+
+          mkdir -p /home/ubuntu/app
+
           cd /home/ubuntu/app || exit 1
           rm -rf *
           git clone ${{ secrets.GBLINK }} .
