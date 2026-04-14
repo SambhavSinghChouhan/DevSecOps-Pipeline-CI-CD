@@ -151,6 +151,9 @@ jobs:
           IMAGE=\$(docker images --format "{{.Repository}}:{{.Tag}}" | head -n 1)
           REPORT_DIR=/home/ubuntu/app/reports
           mkdir -p \$REPORT_DIR
+          mkdir -p \$REPORT_DIR/zap
+          mkdir -p \$REPORT_DIR/dependency-check
+
 
           #Trivy scans
           trivy image \$IMAGE -o \$REPORT_DIR/trivy-image.txt || true
@@ -160,7 +163,7 @@ jobs:
           # OWASP Dependency Check 
 
           if ! command -v dependency-check.sh &> /dev/null; then
-          cd/opt
+            cd/opt
             wget -q https://github.com/jeremylong/DependencyCheck/releases/latest/download/dependency-check-8.4.0-release.zip
             unzip -o dependency-check-8.4.0-release.zip -d dependency-check
             chmod +x dependency-check/bin/dependency-check.sh
@@ -173,9 +176,13 @@ jobs:
             --format HTML \
             --out \$REPORT_DIR/dependency-check-report || true
 
+          if [ -f "\$REPORT_DIR/dependency-check/dependency-check-report.html" ]; then
+            echo "Dependency report generated"
+          fi
+
             # ZAP FIX (IMPORTANT)
 
-          mkdir -p \$REPORT_DIR/zap  
+            
           docker pull ghcr.io/zaproxy/zaproxy:stable
           docker run --rm \
             -v \$REPORT_DIR:/zap/wrk \
@@ -189,6 +196,9 @@ jobs:
           
           # ENSURE FILES EXIST
           ls -lah $REPORT_DIR
+          ls -lah \$REPORT_DIR/dependency-check
+          ls -lah \$REPORT_DIR/zap
+
 
  
           EOF
