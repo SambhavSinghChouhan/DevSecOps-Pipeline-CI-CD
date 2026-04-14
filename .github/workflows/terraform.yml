@@ -137,92 +137,125 @@ jobs:
         run: |
           echo "${{ secrets.KEY }}" > key.pem
           chmod 400 key.pem
+      
       - name: Deploy & Scan on EC2
         run: |
-          ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP << EOF
+          ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP << 'EOF'
           set -e
+
+          echo "========================"
+          echo "INSTALLING ALL TOOLS"
+          echo "========================"
+
+          sudo apt update -y
+
+          # ------------------------
+          # Docker + permissions
+          # ------------------------
+          sudo apt install -y docker.io docker-compose-plugin unzip curl wget git
+          sudo systemctl enable docker
+          sudo systemctl start docker
+          sudo usermod -aG docker ubuntu || true
+
+          # ------------------------
+          # Trivy install
+          # ------------------------
+          if ! command -v trivy &> /dev/null; then
+            wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+            echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/trivy.list
+            sudo apt update -y
+            sudo apt install -y trivy
+          fi
+
+          # ------------------------
+          # OWASP Dependency Check
+          # ------------------------
+          sudo apt install -y openjdk-17-jdk
+
+          if [ ! -d "/opt/dependency-check" ]; then
+            cd /opt
+            sudo wget -q https://github.com/jeremylong/DependencyCheck/releases/latest/download/dependency-check-8.4.0-release.zip
+            sudo unzip -o dependency-check-8.4.0-release.zip -d dependency-check
+            sudo chmod +x /opt/dependency-check/bin/dependency-check.sh
+          fi
+
+          echo "========================"
+          echo "CLONING APP"
+          echo "========================"
+
           cd /home/ubuntu/app
           rm -rf *
-          if [ -z "$BRANCH" ]; then
-            git clone ${{ secrets.GBLINK }} .
-          else
-            git clone -b $BRANCH ${{ secrets.GBLINK }} .
-          fi
+          git clone ${{ secrets.GBLINK }} .
 
-          docker compose down || true
-          docker compose up -d --build
-          
-          echo "Waiting for app to start..."
-          sleep 40
-          
-          IMAGE=\$(docker images --format "{{.Repository}}:{{.Tag}}" | head -n 1)
-          REPORT_DIR=/home/ubuntu/app/reports
-          mkdir -p \$REPORT_DIR
-          mkdir -p \$REPORT_DIR/zap
-          mkdir -p \$REPORT_DIR/dependency-check
+          mkdir -p reports
 
+          IMAGE_NAME="devsecops-image:latest"
 
-          #Trivy scans
-          trivy image \$IMAGE \
+          echo "========================"
+          echo "SAST SCANS (TRIVY + OWASP DC)"
+          echo "========================"
+
+          # Build image locally
+          docker build -t $IMAGE_NAME .
+
+          # TRIVY IMAGE SCAN
+          trivy image $IMAGE_NAME \
             --scanners vuln,secret \
             -f json \
-            -o \$REPORT_DIR/trivy-image.json || true
+            -o reports/trivy-image.json || true
 
-          trivy fs
+          # TRIVY FILE SYSTEM SCAN
+          trivy fs . \
             --scanners vuln,secret \
             -f json \
-            -o \$REPORT_DIR/trivy-fs.json || true
+            -o reports/trivy-fs.json || true
 
-
-
-          # OWASP Dependency Check 
-
-          if ! command -v dependency-check.sh &> /dev/null; then
-            cd /opt
-            wget -q https://github.com/jeremylong/DependencyCheck/releases/latest/download/dependency-check-8.4.0-release.zip
-            unzip -o dependency-check-8.4.0-release.zip -d dependency-check
-            chmod +x dependency-check/bin/dependency-check.sh
-          fi
-
-          cd /home/ubuntu/app
+          # OWASP DEPENDENCY CHECK (REAL HTML)
           /opt/dependency-check/bin/dependency-check.sh \
             --scan . \
             --project "devsecops" \
             --format HTML \
-            --out \$REPORT_DIR/dependency-check-report || true
+            --out reports/dependency-check || true
 
-          echo "Checking app health..."
+          echo "========================"
+          echo "DEPLOYING APP"
+          echo "========================"
+
+          docker compose down || true
+          docker compose up -d --build
+
+          echo "WAITING FOR APP..."
+          sleep 60
+
+          echo "========================"
+          echo "HEALTH CHECK"
+          echo "========================"
+
           for i in {1..10}; do
             curl -s http://localhost:8080 && break || sleep 10
           done
 
-          
+          echo "========================"
+          echo "DAST SCAN (ZAP)"
+          echo "========================"
 
-            # ZAP FIX (IMPORTANT)
-
-          APP_URL=http://localhost:8080
-
-            
           docker pull ghcr.io/zaproxy/zaproxy:stable
+
           docker run --rm \
-            -v \$REPORT_DIR:/zap/wrk \
+            -v /home/ubuntu/app/reports:/zap/wrk \
             ghcr.io/zaproxy/zaproxy:stable \
             zap-baseline.py \
-            -t http://localhost:8080 \
-            -r /zap/wrk/zap/zap-report.html \
-            -x /zap/wrk/zap/zap-report.xml \
+            -t http://host.docker.internal:8080 \
+            -r /zap/wrk/zap-report.html \
+            -x /zap/wrk/zap-report.xml \
             --auto || true
-            --hook=/zap/null || true
 
-          
-          # ENSURE FILES EXIST
-          echo "==== REPORTS GENERATED ===="
-          ls -lah $REPORT_DIR
-          ls -lah \$REPORT_DIR/dependency-check
-          ls -lah \$REPORT_DIR/zap
+          echo "========================"
+          echo "REPORT CHECK"
+          echo "========================"
 
+          ls -lah reports
 
- 
           EOF
       # ✅ FIX: safer fetch (no failures if files missing)
       - name: Fetch Reports
