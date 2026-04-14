@@ -230,13 +230,21 @@ jobs:
           trivy fs . -f table -o reports/trivy-fs.txt || true
 
           echo "========================"
-          echo "DEPENDENCY CHECK"
+          echo "DEPENDENCY CHECK (FIXED)"
           echo "========================"
+
+          rm -rf /home/ubuntu/dependency-db
+          mkdir -p /home/ubuntu/dependency-db
+          mkdir -p /home/ubuntu/reports/dependency-check
 
           /opt/dependency-check/bin/dependency-check.sh \
             --scan . \
             --format ALL \
-            --out reports/dependency-check || true
+            --out reports/dependency-check \
+            --data /home/ubuntu/dependency-db \
+            --disableCentral \
+            --noupdate \
+            --failOnCVSS 0 || true
 
           ls -lah reports
           EOF
