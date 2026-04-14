@@ -14,7 +14,6 @@ on:
 jobs:
   terraform:
     runs-on: ubuntu-latest
-
     defaults:
       run:
         working-directory: devsecops-terraform
@@ -27,70 +26,40 @@ jobs:
       AWS_REGION: ap-south-1
 
     outputs:
-      ec2_ip: ${{ steps.tf.outputs.ec2_ip }}   # ✅ OUTPUT EXPOSED
+      ec2_ip: ${{ steps.tf.outputs.ec2_ip }}
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Show files
-        run: ls -R
+      - run: ls -R
 
-      - name: Configure AWS Credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.OIDC }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v3
 
-      - name: Terraform Init
-        run: terraform init
+      - run: terraform init
+      - run: terraform validate
 
-      - name: Terraform Validate
-        run: terraform validate
-
-      - name: Terraform Plan
+      - run: terraform plan -out=tfplan
         if: ${{ github.event.inputs.action == 'apply' }}
-        run: terraform plan -out=tfplan
 
-      - name: Terraform Apply
+      - run: terraform apply -auto-approve tfplan
         if: ${{ github.event.inputs.action == 'apply' }}
-        run: terraform apply -auto-approve tfplan
 
-      # ✅ GET EC2 IP FROM TERRAFORM
-      - name: Get EC2 IP
+      - id: tf
         if: ${{ github.event.inputs.action == 'apply' }}
-        id: tf
-        run: |
-          echo "ec2_ip=$(terraform output -raw ec2_public_ip)" >> $GITHUB_OUTPUT
-      - name: Print EC2 IP
-        if: ${{ github.event.inputs.action == 'apply' }}
-        run: |
-          echo "EC2 IP: ${{ steps.tf.outputs.ec2_ip }}"
-      - name: Commit tfstate
-        if: ${{ github.event.inputs.action == 'apply' }}
-        run: |
-          git config --global user.name "github-actions"
-          git config --global user.email "github-actions@github.com"
-          git add terraform.tfstate || true
-          git commit -m "update terraform state" || echo "No changes"
-          git push
-      - name: Terraform Destroy
-        if: ${{ github.event.inputs.action == 'destroy' }}
-        run: terraform destroy -auto-approve
+        run: echo "ec2_ip=$(terraform output -raw ec2_public_ip)" >> $GITHUB_OUTPUT
 
-
+      - run: echo "EC2 IP: ${{ steps.tf.outputs.ec2_ip }}"
+        if: ${{ github.event.inputs.action == 'apply' }}
 
   deploy-and-scan:
     runs-on: ubuntu-latest
     needs: terraform
     if: ${{ github.event.inputs.action == 'apply' }}
-
-    permissions:
-      id-token: write
-      contents: read
 
     env:
       AWS_REGION: ap-south-1
@@ -98,16 +67,14 @@ jobs:
       BRANCH: ${{ secrets.BRANCH }}
 
     steps:
-      - name: Checkout Repo
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Configure AWS (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.OIDC }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Clone Target Repo
+      - name: Clone App
         run: |
           if [ -z "$BRANCH" ]; then
             git clone ${{ secrets.GBLINK }} app
@@ -115,100 +82,82 @@ jobs:
             git clone -b $BRANCH ${{ secrets.GBLINK }} app
           fi
 
-      - name: Login to ECR
-        run: |
-          ECR_URI=$(aws ecr describe-repositories --query 'repositories[0].repositoryUri' --output text)
-          aws ecr get-login-password --region $AWS_REGION \
-          | docker login --username AWS --password-stdin $(echo $ECR_URI | cut -d'/' -f1)
-
-      - name: Build Docker Image (Smart)
-        run: |
-          cd app
-          if [ -f "docker-compose.yml" ]; then
-            docker compose build
-          else
-            docker build -t devsecops-image .
-          fi
-
-      - name: Push to ECR
-        run: |
-          ECR_URI=$(aws ecr describe-repositories --query 'repositories[0].repositoryUri' --output text)
-          IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | head -n 1)
-          docker tag $IMAGE $ECR_URI:latest
-          docker push $ECR_URI:latest
-
       - name: Setup SSH
         run: |
           echo "${{ secrets.KEY }}" > key.pem
           chmod 400 key.pem
 
-      - name: Deploy & Scan on EC2
+      # =========================
+      # INSTALL TOOLS
+      # =========================
+      - name: Install tools
         run: |
           ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP << 'EOF'
           set +e
 
-          echo "========================"
-          echo "INSTALLING ALL TOOLS"
-          echo "========================"
-
           sudo apt update -y
-          sudo apt install -y docker.io unzip curl wget git
+          sudo apt install -y docker.io unzip curl wget git openjdk-17-jdk
           sudo systemctl enable docker
           sudo systemctl start docker
+
           sudo usermod -aG docker ubuntu || true
 
-          sudo curl -SL https://github.com/docker/compose/releases/download/v2.24.6/docker-compose-linux-x86_64 \
-            -o /usr/local/bin/docker-compose
-          sudo chmod +x /usr/local/bin/docker-compose
-
+          # Trivy
           if ! command -v trivy &> /dev/null; then
             wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
-            echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/trivy.list
+            echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" \
+              | sudo tee /etc/apt/sources.list.d/trivy.list
             sudo apt update -y
             sudo apt install -y trivy
           fi
 
-          sudo apt install -y openjdk-17-jdk
-
-          if [ ! -d "/opt/dependency-check" ]; then
-            cd /opt
-            sudo wget -q https://github.com/jeremylong/DependencyCheck/releases/download/v8.4.0/dependency-check-8.4.0-release.zip
-            sudo unzip -o dependency-check-8.4.0-release.zip -d dependency-check
-            sudo chmod +x /opt/dependency-check/bin/dependency-check.sh
-          fi
-
-          docker --version
-          trivy --version || true
+          # Dependency Check FIXED
+          cd /opt
+          sudo rm -rf dependency-check
+          sudo wget -q https://github.com/jeremylong/DependencyCheck/releases/download/v8.4.0/dependency-check-8.4.0-release.zip
+          sudo unzip -o dependency-check-8.4.0-release.zip
+          sudo mv dependency-check /opt/dependency-check
+          sudo chmod +x /opt/dependency-check/bin/dependency-check.sh
 
           EOF
 
-      - name: SAST Scan (Trivy + OWASP Dependency Check)
+      # =========================
+      # SAST SCAN
+      # =========================
+      - name: SAST Scan
         run: |
           ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP << 'EOF'
-
           set +e
 
-          mkdir -p /home/ubuntu/app
+          rm -rf /home/ubuntu/app
+          git clone ${{ secrets.GBLINK }} /home/ubuntu/app
 
-          cd /home/ubuntu/app || exit 1
-          rm -rf *
-          git clone ${{ secrets.GBLINK }} .
-
+          cd /home/ubuntu/app
           mkdir -p reports
 
-          docker build -t app:latest .
+          # Build image safely
+          if [ -f Dockerfile ]; then
+            docker build -t app:latest .
+          fi
 
+          # TRIVY (JSON + TXT)
           trivy image app:latest -f json -o reports/trivy-image.json || true
-          trivy fs . -f json -o reports/trivy-fs.json || true
+          trivy image app:latest -f table -o reports/trivy-image.txt || true
 
+          trivy fs . -f json -o reports/trivy-fs.json || true
+          trivy fs . -f table -o reports/trivy-fs.txt || true
+
+          # Dependency Check (HTML + TEXT)
           /opt/dependency-check/bin/dependency-check.sh \
             --scan . \
-            --format HTML \
+            --format ALL \
             --out reports/dependency-check || true
 
-          ls -lah reports
           EOF
 
+      # =========================
+      # DEPLOY + ZAP
+      # =========================
       - name: Deploy + ZAP Scan
         run: |
           ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP << 'EOF'
@@ -222,28 +171,32 @@ jobs:
 
           mkdir -p reports/zap
 
+          # FIXED PORT → frontend 5173
           docker run --rm \
             -v /home/ubuntu/app/reports:/zap/wrk \
             ghcr.io/zaproxy/zaproxy:stable \
             zap-baseline.py \
-            -t http://localhost:8080 \
+            -t http://localhost:5173 \
             -r /zap/wrk/zap/zap-report.html \
             -x /zap/wrk/zap/zap-report.xml \
+            -J /zap/wrk/zap/zap-report.json \
             --auto || true
 
-          ls -lah reports/zap
           EOF
 
-      - name: Debug Reports
-        run: |
-          ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP "ls -R /home/ubuntu/app/reports || true"
-
+      # =========================
+      # FETCH REPORTS
+      # =========================
       - name: Fetch Reports
         run: |
           mkdir -p reports
-          scp -r -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP:/home/ubuntu/app/reports/* reports/ || true
+          scp -r -o StrictHostKeyChecking=no -i key.pem \
+          ubuntu@$EC2_IP:/home/ubuntu/app/reports/* reports/ || true
 
-      - name: Upload Reports to GitHub Artifacts
+      # =========================
+      # ARTIFACTS
+      # =========================
+      - name: Upload Reports
         uses: actions/upload-artifact@v4
         with:
           name: security-reports
