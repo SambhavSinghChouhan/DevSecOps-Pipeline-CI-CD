@@ -242,8 +242,6 @@ jobs:
             --format ALL \
             --out reports/dependency-check \
             --data /home/ubuntu/dependency-db \
-            --disableCentral \
-            --noupdate \
             --failOnCVSS 0 || true
 
           ls -lah reports
@@ -252,38 +250,33 @@ jobs:
       - name: Deploy + ZAP Scan
         run: |
           ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP << 'EOF'
+          set +e
 
           cd /home/ubuntu/app
 
-          echo "========================"
-          echo "STARTING DOCKER COMPOSE"
-          echo "========================"
+          sudo docker-compose down || true
+          sudo docker-compose up -d --build
 
-          docker-compose down || true
-          docker-compose up -d --build
-
-          sleep 60
+          echo "Waiting for app..."
+          sleep 90
 
           mkdir -p reports/zap
 
-          echo "========================"
-          echo "ZAP SCANNING FRONTEND (5173)"
-          echo "========================"
-
-          FRONTEND_PORT=5173
+          echo "Testing app connectivity..."
+          curl -I http://localhost:5173 || echo "App not reachable"
 
           docker run --rm \
             -v /home/ubuntu/app/reports:/zap/wrk \
             ghcr.io/zaproxy/zaproxy:stable \
             zap-baseline.py \
-            -t http://localhost:$FRONTEND_PORT \
+            -t http://localhost:5173 \
             -r /zap/wrk/zap/zap-report.html \
             -x /zap/wrk/zap/zap-report.xml \
             -J /zap/wrk/zap/zap-report.json \
             --auto || true
 
           ls -lah reports/zap
-          EOF 
+          EOF
 
       - name: Debug Reports
         run: |
