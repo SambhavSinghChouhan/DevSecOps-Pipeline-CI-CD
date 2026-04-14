@@ -151,11 +151,16 @@ jobs:
           IMAGE=\$(docker images --format "{{.Repository}}:{{.Tag}}" | head -n 1)
           REPORT_DIR=/home/ubuntu/app/reports
           mkdir -p \$REPORT_DIR
+
+          #Trivy scans
           trivy image \$IMAGE -o \$REPORT_DIR/trivy-image.txt || true
           trivy fs . -o \$REPORT_DIR/trivy-fs.txt || true
 
+
+          # OWASP Dependency Check 
+
+          if ! command -v dependency-check.sh &> /dev/null; then
           cd/opt
-          if [ ! -d "dependency-check" ]; then
             wget -q https://github.com/jeremylong/DependencyCheck/releases/latest/download/dependency-check-8.4.0-release.zip
             unzip -o dependency-check-8.4.0-release.zip -d dependency-check
             chmod +x dependency-check/bin/dependency-check.sh
@@ -169,22 +174,17 @@ jobs:
 
             # ZAP FIX (IMPORTANT)
 
-          docker pull zaproxy/zap-stable
-          docker run --rm zaproxy/zap-stable zap-baseline.py \
-            -t http://localhost \
-            -r zap-report.html || true
+          mkdir -p \$REPORT_DIR/zap  
+          docker pull ghcr.io/zaproxy/zaproxy:stable
+          docker run --rm \
+            -v \$REPORT_DIR:/zap/wrk \
+            ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py \
+            -t http://localhost:8080 \
+            -r /zap/wrk/zap/zap-report.html \
+            --auto || true
 
-          mv zap-report.html \$REPORT_DIR/ || true
-
-          # ENSURE FILES ALWAYS EXIST
-
-          touch \$REPORT_DIR/trivy-image.txt
-          touch \$REPORT_DIR/trivy-fs.txt
-          touch \$REPORT_DIR/zap-report.html
-
-
-
-          
+ 
           EOF
       # ✅ FIX: safer fetch (no failures if files missing)
       - name: Fetch Reports
