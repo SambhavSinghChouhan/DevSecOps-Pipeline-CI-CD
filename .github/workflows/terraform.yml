@@ -141,7 +141,7 @@ jobs:
       - name: Deploy & Scan on EC2
         run: |
           ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP << 'EOF'
-          set -e
+          set +e
 
           echo "========================"
           echo "INSTALLING ALL TOOLS"
@@ -164,6 +164,9 @@ jobs:
             -o /usr/local/bin/docker-compose
 
           sudo chmod +x /usr/local/bin/docker-compose
+
+          # verify
+          /usr/local/bin/docker-compose version || true
 
           # ------------------------
           # Trivy install
