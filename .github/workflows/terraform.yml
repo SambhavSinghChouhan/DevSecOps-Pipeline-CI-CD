@@ -157,6 +157,13 @@ jobs:
           sudo systemctl start docker
           sudo usermod -aG docker ubuntu || true
 
+          echo "==== INSTALLING DOCKER COMPOSE (FIXED) ===="
+
+          sudo curl -SL https://github.com/docker/compose/releases/download/v2.24.6/docker-compose-linux-x86_64 \
+            -o /usr/local/bin/docker-compose
+
+          sudo chmod +x /usr/local/bin/docker-compose
+
           # ------------------------
           # Trivy install
           # ------------------------
@@ -179,9 +186,18 @@ jobs:
             sudo chmod +x /opt/dependency-check/bin/dependency-check.sh
           fi
 
-          echo "========================"
-          echo "CLONING APP"
-          echo "========================"
+          echo "==== DONE SETUP ===="
+
+          docker --version
+          docker-compose version || true
+          trivy --version || true
+
+          EOF
+
+      - name: SAST Scan (Trivy + OWASP)
+        run: |    
+
+          ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP << 'EOF'
 
           cd /home/ubuntu/app
           rm -rf *
@@ -189,60 +205,42 @@ jobs:
 
           mkdir -p reports
 
-          IMAGE_NAME="devsecops-image:latest"
+          docker build -t app:latest .
 
-          echo "========================"
-          echo "SAST SCANS (TRIVY + OWASP DC)"
-          echo "========================"
-
-          # Build image locally
-          docker build -t $IMAGE_NAME .
-
-          # TRIVY IMAGE SCAN
-          trivy image $IMAGE_NAME \
-            --scanners vuln,secret \
+          # TRIVY IMAGE
+          trivy image app:latest \
             -f json \
             -o reports/trivy-image.json || true
 
-          # TRIVY FILE SYSTEM SCAN
+          # TRIVY FILE SYSTEM
           trivy fs . \
-            --scanners vuln,secret \
             -f json \
             -o reports/trivy-fs.json || true
 
-          # OWASP DEPENDENCY CHECK (REAL HTML)
+          # OWASP DEPENDENCY CHECK
           /opt/dependency-check/bin/dependency-check.sh \
             --scan . \
-            --project "devsecops" \
             --format HTML \
             --out reports/dependency-check || true
 
-          echo "========================"
-          echo "DEPLOYING APP"
-          echo "========================"
+          EOF
 
-          docker compose down || true
-          docker compose up -d --build
+      - name: Deploy + ZAP Scan
+        run: |
+          ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP << 'EOF'
 
-          echo "WAITING FOR APP..."
+          cd /home/ubuntu/app
+
+          docker-compose down || true
+          docker-compose up -d --build
+
+          echo "Waiting for app..."
           sleep 60
 
-          echo "========================"
-          echo "HEALTH CHECK"
-          echo "========================"
-
-          for i in {1..10}; do
-            curl -s http://localhost:8080 && break || sleep 10
-          done
-
-          echo "========================"
-          echo "DAST SCAN (ZAP)"
-          echo "========================"
-
-          docker pull ghcr.io/zaproxy/zaproxy:stable
+          mkdir -p reports/zap
 
           docker run --rm \
-            -v /home/ubuntu/app/reports:/zap/wrk \
+            -v /home/ubuntu/app/reports/zap:/zap/wrk \
             ghcr.io/zaproxy/zaproxy:stable \
             zap-baseline.py \
             -t http://host.docker.internal:8080 \
@@ -250,13 +248,8 @@ jobs:
             -x /zap/wrk/zap-report.xml \
             --auto || true
 
-          echo "========================"
-          echo "REPORT CHECK"
-          echo "========================"
-
-          ls -lah reports
-
           EOF
+          
       # ✅ FIX: safer fetch (no failures if files missing)
       - name: Fetch Reports
         run: |
