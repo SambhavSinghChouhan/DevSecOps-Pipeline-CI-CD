@@ -178,8 +178,9 @@ jobs:
           sudo apt install -y openjdk-17-jdk
           if [ ! -d "/opt/dependency-check" ]; then
             cd /opt
+            sudo rm -rf dependency-check*
             sudo wget -q https://github.com/jeremylong/DependencyCheck/releases/download/v8.4.0/dependency-check-8.4.0-release.zip
-            sudo unzip -o dependency-check-8.4.0-release.zip
+            sudo unzip dependency-check-8.4.0-release.zip
             sudo mv dependency-check /opt/dependency-check
             sudo chmod +x /opt/dependency-check/bin/dependency-check.sh
           fi
