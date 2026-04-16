@@ -266,12 +266,31 @@ jobs:
           mkdir -p /home/ubuntu/app/reports/dependency-check
           mkdir -p /home/ubuntu/dependency-db
 
+          echo "========================"
+          echo "DOWNLOADING NVD DATA"
+          echo "========================"
+
+          cd /home/ubuntu/dependency-db
+
+          # Download recent NVD feeds
+          for year in 2023 2024; do
+            wget -q https://nvd.nist.gov/feeds/json/cve/1.1/nvdcve-1.1-${year}.json.gz
+            gunzip -f nvdcve-1.1-${year}.json.gz
+          done
+
+          # Download modified feed
+          wget -q https://nvd.nist.gov/feeds/json/cve/1.1/nvdcve-1.1-modified.json.gz
+          gunzip -f nvdcve-1.1-modified.json.gz
+
+          cd /home/ubuntu/app
+
           /opt/dependency-check/bin/dependency-check.sh \
             --scan . \
             --project "devsecops-app" \
             --format HTML \
             --out /home/ubuntu/app/reports/dependency-check \
             --data /home/ubuntu/dependency-db \
+            --noupdate \
             --failOnCVSS 0 || true
 
           echo "Dependency Check Reports:"
