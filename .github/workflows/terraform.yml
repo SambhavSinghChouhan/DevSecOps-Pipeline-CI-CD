@@ -174,14 +174,23 @@ jobs:
             sudo apt install -y trivy
           fi
 
-          # dependency check
+          # dependency check (FIXED)
           sudo apt install -y openjdk-17-jdk
+
           if [ ! -d "/opt/dependency-check" ]; then
             cd /opt
             sudo rm -rf dependency-check*
+
             sudo wget -q https://github.com/jeremylong/DependencyCheck/releases/download/v8.4.0/dependency-check-8.4.0-release.zip
             sudo unzip dependency-check-8.4.0-release.zip
-            sudo mv dependency-check /opt/dependency-check
+
+            # ✅ IMPORTANT: do NOT move if already correct
+            if [ -d "dependency-check" ]; then
+              sudo mv dependency-check dependency-check-temp || true
+              sudo rm -rf /opt/dependency-check
+              sudo mv dependency-check-temp /opt/dependency-check
+            fi
+
             sudo chmod +x /opt/dependency-check/bin/dependency-check.sh
           fi
 
