@@ -213,8 +213,10 @@ jobs:
           echo "CLONING REPO"
           echo "========================"
 
-          git clone ${{ secrets.GBLINK }} .
-          ls -lah   # ✅ verify files
+          git clone -b ${{ secrets.BRANCH }} ${{ secrets.GBLINK }} .
+
+          echo "FILES AFTER CLONE:"
+          ls -lah
 
           mkdir -p reports
 
