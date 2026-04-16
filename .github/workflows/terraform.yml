@@ -273,7 +273,7 @@ jobs:
             --format JSON \
             --out reports/dependency-check \
             --data /home/ubuntu/dependency-db \
-            # --nvdApiKey ${{ secrets.NVD_API_KEY }} \
+           
             --enableExperimental \
             --failOnCVSS 0 || true
 
