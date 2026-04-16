@@ -174,26 +174,6 @@ jobs:
             sudo apt install -y trivy
           fi
 
-          # dependency check (FIXED)
-          sudo apt install -y openjdk-17-jdk
-
-          if [ ! -d "/opt/dependency-check" ]; then
-            cd /opt
-            sudo rm -rf dependency-check*
-
-            sudo wget -q https://github.com/jeremylong/DependencyCheck/releases/download/v8.4.0/dependency-check-8.4.0-release.zip
-            sudo unzip dependency-check-8.4.0-release.zip
-
-            # ✅ IMPORTANT: do NOT move if already correct
-            if [ -d "dependency-check" ]; then
-              sudo mv dependency-check dependency-check-temp || true
-              sudo rm -rf /opt/dependency-check
-              sudo mv dependency-check-temp /opt/dependency-check
-            fi
-
-            sudo chmod +x /opt/dependency-check/bin/dependency-check.sh
-          fi
-
           docker --version
           trivy --version
           aws --version
@@ -202,16 +182,9 @@ jobs:
 
       - name: SAST Scan (Trivy + OWASP Dependency Check)
         run: |
-          # Download NVD data on runner using GitHub mirror
-          cd /tmp
-          git clone https://github.com/vulncheck-oss/nvd-json-data-feeds.git nvd-data
-
           # Setup SSH key
           echo "${{ secrets.KEY }}" > key.pem
           chmod 400 key.pem
-
-          # SCP NVD data to EC2
-          scp -o StrictHostKeyChecking=no -i key.pem /tmp/nvd-data/nvdcve-1.1-*.json ubuntu@$EC2_IP:/home/ubuntu/dependency-db/
 
           # Now run the scan on EC2
           ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP << 'EOF'
@@ -277,15 +250,13 @@ jobs:
 
           mkdir -p /home/ubuntu/app/reports/dependency-check
 
-          cd /home/ubuntu/app
-
-          /opt/dependency-check/bin/dependency-check.sh \
-            --scan . \
+          docker run --rm \
+            -v /home/ubuntu/app:/src \
+            owasp/dependency-check \
+            --scan /src \
             --project "devsecops-app" \
             --format HTML \
-            --out /home/ubuntu/app/reports/dependency-check \
-            --data /home/ubuntu/dependency-db \
-            --noupdate \
+            --out /src/reports/dependency-check \
             --failOnCVSS 0 || true
 
           echo "Dependency Check Reports:"
