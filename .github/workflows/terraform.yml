@@ -273,7 +273,7 @@ jobs:
             --format JSON \
             --out reports/dependency-check \
             --data /home/ubuntu/dependency-db \
-            --nvdApiKey ${{ secrets.NVD_API_KEY }} \
+            # --nvdApiKey ${{ secrets.NVD_API_KEY }} \
             --enableExperimental \
             --failOnCVSS 0 || true
 
@@ -284,7 +284,7 @@ jobs:
 
       - name: Deploy + ZAP Scan
         run: |
-          ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP << 'EOF'
+          ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP << EOF
           set -e
 
           cd /home/ubuntu/app
@@ -326,7 +326,7 @@ jobs:
             -v /home/ubuntu/app/reports:/zap/wrk \
             ghcr.io/zaproxy/zaproxy:stable \
             zap-baseline.py \
-            -t http://localhost:5173 \
+            -t http://$EC2_IP:5173 \
             -r /zap/wrk/zap-report.html \
             -x /zap/wrk/zap-report.xml \
             -J /zap/wrk/zap-report.json \
