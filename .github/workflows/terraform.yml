@@ -140,15 +140,16 @@ jobs:
 
       - name: Setup SSH
         run: |
-          echo "${{ secrets.KEY }}" > key.pem
-          chmod 400 key.pem
+          cd /tmp
+          echo "${{ secrets.KEY }}" > k8s.pem
+          chmod 400 k8s.pem
 
       # =========================
       # INSTALL TOOLS
       # =========================
       - name: Deploy & Scan on EC2
         run: |
-          ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP << 'EOF'
+          ssh -o StrictHostKeyChecking=no -i /tmp/k8s.pem ubuntu@$EC2_IP << 'EOF'
           set -e   # ❗ fail fast (VERY IMPORTANT)
 
           echo "========================"
@@ -183,11 +184,12 @@ jobs:
       - name: SAST Scan (Trivy + OWASP Dependency Check)
         run: |
           # Setup SSH key
-          echo "${{ secrets.KEY }}" > key.pem
-          chmod 400 key.pem
+          cd /tmp
+          echo "${{ secrets.KEY }}" > k8s.pem
+          chmod 400 k8s.pem
 
           # Now run the scan on EC2
-          ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP << 'EOF'
+          ssh -o StrictHostKeyChecking=no -i /tmp/k8s.pem ubuntu@$EC2_IP << 'EOF'
           set -e
 
           mkdir -p /home/ubuntu/app
@@ -266,7 +268,7 @@ jobs:
 
       - name: Deploy + ZAP Scan
         run: |
-          ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP << EOF
+          ssh -o StrictHostKeyChecking=no -i /tmp/k8s.pem ubuntu@$EC2_IP << EOF
           set -e
 
           cd /home/ubuntu/app
@@ -322,7 +324,7 @@ jobs:
 
       - name: Debug Reports
         run: |
-          ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP << 'EOF'
+          ssh -o StrictHostKeyChecking=no -i /tmp/k8s.pem ubuntu@$EC2_IP << 'EOF'
             echo "========================"
             echo "VERIFY FINAL REPORTS"
             echo "========================"
@@ -344,7 +346,7 @@ jobs:
       - name: Fetch Reports
         run: |
           mkdir -p reports
-          scp -r -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP:/home/ubuntu/app/reports/* reports/
+          scp -r -o StrictHostKeyChecking=no -i /tmp/k8s.pem ubuntu@$EC2_IP:/home/ubuntu/app/reports/* reports/
 
 
       - name: Upload Reports to GitHub Artifacts
