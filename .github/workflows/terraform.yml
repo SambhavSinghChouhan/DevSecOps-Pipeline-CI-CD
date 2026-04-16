@@ -223,14 +223,19 @@ jobs:
           echo "========================"
 
           AWS_REGION=ap-south-1
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          ECR_URI=$(aws ecr describe-repositories --query 'repositories[0].repositoryUri' --output text)
-          --region $AWS_REGION \
-          --query 'repositories[0].repositoryUri' \
-          --output text)
 
-          aws ecr get-login-password --region ap-south-1 | \
-          docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.ap-south-1.amazonaws.com
+          ACCOUNT_ID=$(aws sts get-caller-identity \
+            --query Account \
+            --output text \
+            --region $AWS_REGION)
+
+          ECR_URI=$(aws ecr describe-repositories \
+            --region $AWS_REGION \
+            --query 'repositories[0].repositoryUri' \
+            --output text)
+
+          aws ecr get-login-password --region $AWS_REGION | \
+          docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
 
           echo "========================"
           echo "PULL IMAGE FROM ECR"
