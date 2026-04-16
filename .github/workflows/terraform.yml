@@ -202,6 +202,20 @@ jobs:
 
       - name: SAST Scan (Trivy + OWASP Dependency Check)
         run: |
+          # Download NVD data on runner
+          cd /tmp
+          curl -L -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" -o nvd.zip https://nvd.nist.gov/feeds/json/cve/1.1/nvdcve-1.1-all.json.zip
+          unzip -q nvd.zip
+          rm nvd.zip
+
+          # Setup SSH key
+          echo "${{ secrets.KEY }}" > key.pem
+          chmod 400 key.pem
+
+          # SCP NVD data to EC2
+          scp -o StrictHostKeyChecking=no -i key.pem /tmp/nvdcve-1.1-*.json ubuntu@$EC2_IP:/home/ubuntu/dependency-db/
+
+          # Now run the scan on EC2
           ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP << 'EOF'
           set -e
 
@@ -264,18 +278,6 @@ jobs:
           echo "========================"
 
           mkdir -p /home/ubuntu/app/reports/dependency-check
-          mkdir -p /home/ubuntu/dependency-db
-
-          echo "========================"
-          echo "DOWNLOADING NVD DATA"
-          echo "========================"
-
-          cd /home/ubuntu/dependency-db
-
-          # Download the complete NVD data zip using curl
-          curl -L -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" -o nvdcve-1.1-all.json.zip https://nvd.nist.gov/feeds/json/cve/1.1/nvdcve-1.1-all.json.zip
-          unzip -q nvdcve-1.1-all.json.zip
-          rm nvdcve-1.1-all.json.zip
 
           cd /home/ubuntu/app
 
