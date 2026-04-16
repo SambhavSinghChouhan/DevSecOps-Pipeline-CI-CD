@@ -259,26 +259,26 @@ jobs:
           trivy fs . -f json -o reports/trivy-fs.json
           trivy fs . -f table -o reports/trivy-fs.txt
 
-          echo "========================"
-          echo "DEPENDENCY CHECK"
-          echo "========================"
+          # dependency check (UPDATED - FIXED)
+          sudo apt install -y openjdk-17-jdk
 
-          mkdir -p /home/ubuntu/dependency-db
-          mkdir -p reports/dependency-check
+          if [ ! -d "/opt/dependency-check" ]; then
+            cd /opt
 
-          /opt/dependency-check/bin/dependency-check.sh \
-            --scan . \
-            --project "devsecops-app" \
-            --format HTML \
-            --format JSON \
-            --out reports/dependency-check \
-            --data /home/ubuntu/dependency-db \
-           
-            --enableExperimental \
-            --failOnCVSS 0 || true
+            sudo rm -rf dependency-check*
 
-          echo "Dependency Check Reports:"
-          ls -lah reports/dependency-check
+            sudo wget -q https://github.com/jeremylong/DependencyCheck/releases/download/v12.1.0/dependency-check-12.1.0-release.zip
+
+            sudo unzip dependency-check-12.1.0-release.zip
+
+            if [ -d "dependency-check" ]; then
+              sudo mv dependency-check /opt/dependency-check
+            fi
+
+        
+
+            sudo chmod +x /opt/dependency-check/bin/dependency-check.sh
+          fi
           EOF
 
 
