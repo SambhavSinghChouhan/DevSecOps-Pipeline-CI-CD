@@ -259,26 +259,24 @@ jobs:
           trivy fs . -f json -o reports/trivy-fs.json
           trivy fs . -f table -o reports/trivy-fs.txt
 
-          # dependency check (UPDATED - FIXED)
-          sudo apt install -y openjdk-17-jdk
+          echo "========================"
+          echo "DEPENDENCY CHECK"
+          echo "========================"
 
-          if [ ! -d "/opt/dependency-check" ]; then
-            cd /opt
+          mkdir -p /home/ubuntu/app/reports/dependency-check
+          mkdir -p /home/ubuntu/dependency-db
 
-            sudo rm -rf dependency-check*
+          /opt/dependency-check/bin/dependency-check.sh \
+            --scan . \
+            --project "devsecops-app" \
+            --format HTML \
+            --out /home/ubuntu/app/reports/dependency-check \
+            --data /home/ubuntu/dependency-db \
+            --noupdate \
+            --failOnCVSS 0 || true
 
-            sudo wget -q https://github.com/jeremylong/DependencyCheck/releases/download/v12.1.0/dependency-check-12.1.0-release.zip
-
-            sudo unzip dependency-check-12.1.0-release.zip
-
-            if [ -d "dependency-check" ]; then
-              sudo mv dependency-check /opt/dependency-check
-            fi
-
-        
-
-            sudo chmod +x /opt/dependency-check/bin/dependency-check.sh
-          fi
+          echo "Dependency Check Reports:"
+          ls -lah /home/ubuntu/app/reports/dependency-check
           EOF
 
 
@@ -327,13 +325,13 @@ jobs:
             ghcr.io/zaproxy/zaproxy:stable \
             zap-baseline.py \
             -t http://$EC2_IP:5173 \
-            -r /zap/wrk/zap-report.html \
-            -x /zap/wrk/zap-report.xml \
-            -J /zap/wrk/zap-report.json \
+            -r /zap/wrk/zap/zap-report.html \
+            -x /zap/wrk/zap/zap-report.xml \
+            -J /zap/wrk/zap/zap-report.json \
             --auto || true
 
           echo "ZAP Reports:"
-          ls -lah reports/zap
+          ls -lah /home/ubuntu/app/reports/zap
           EOF
 
 
