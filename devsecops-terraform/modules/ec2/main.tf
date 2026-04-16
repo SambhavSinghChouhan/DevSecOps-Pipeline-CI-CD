@@ -30,6 +30,11 @@ resource "aws_security_group" "sg" {
   }
 }
 
+resource "aws_iam_instance_profile" "ec2_profile" {
+  name = "ec2-ecr-profile"
+  role = "ec2_permission_to_ecr-for-MP"
+}
+
 resource "aws_instance" "devsecops" {
   ami = "ami-0a7cf821b91bcccbc" 
   instance_type = var.instance_type
@@ -37,6 +42,9 @@ resource "aws_instance" "devsecops" {
   key_name      = var.key_name
 
   vpc_security_group_ids = [aws_security_group.sg.id]
+
+  iam_instance_profile = aws_iam_instance_profile.ec2_profile.name
+
 
    root_block_device {
     volume_size = 30
