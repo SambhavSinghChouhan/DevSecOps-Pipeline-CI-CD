@@ -272,15 +272,10 @@ jobs:
 
           cd /home/ubuntu/dependency-db
 
-          # Download recent NVD feeds
-          for year in 2023 2024; do
-            wget -q https://nvd.nist.gov/feeds/json/cve/1.1/nvdcve-1.1-${year}.json.gz
-            gunzip -f nvdcve-1.1-${year}.json.gz
-          done
-
-          # Download modified feed
-          wget -q https://nvd.nist.gov/feeds/json/cve/1.1/nvdcve-1.1-modified.json.gz
-          gunzip -f nvdcve-1.1-modified.json.gz
+          # Download the complete NVD data zip
+          wget -q --user-agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" https://nvd.nist.gov/feeds/json/cve/1.1/nvdcve-1.1-all.json.zip
+          unzip -q nvdcve-1.1-all.json.zip
+          rm nvdcve-1.1-all.json.zip
 
           cd /home/ubuntu/app
 
