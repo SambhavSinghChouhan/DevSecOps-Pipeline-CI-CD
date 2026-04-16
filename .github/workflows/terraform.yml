@@ -140,9 +140,8 @@ jobs:
 
       - name: Setup SSH
         run: |
-          cd /tmp
-          echo "${{ secrets.KEY }}" > k8s.pem
-          chmod 400 k8s.pem
+          printf '%s\n' "${{ secrets.KEY }}" > /tmp/k8s.pem
+          chmod 400 /tmp/k8s.pem
 
       # =========================
       # INSTALL TOOLS
@@ -184,9 +183,8 @@ jobs:
       - name: SAST Scan (Trivy + OWASP Dependency Check)
         run: |
           # Setup SSH key
-          cd /tmp
-          echo "${{ secrets.KEY }}" > k8s.pem
-          chmod 400 k8s.pem
+          printf '%s\n' "${{ secrets.KEY }}" > /tmp/k8s.pem
+          chmod 400 /tmp/k8s.pem
 
           # Now run the scan on EC2
           ssh -o StrictHostKeyChecking=no -i /tmp/k8s.pem ubuntu@$EC2_IP << 'EOF'
