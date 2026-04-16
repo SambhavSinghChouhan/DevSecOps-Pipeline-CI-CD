@@ -243,7 +243,7 @@ jobs:
           echo "========================"
           mkdir -p /home/ubuntu/app/reports/dependency-check
           mkdir -p /home/ubuntu/dependency-db
-          # Run dependency-check with offline/cache-friendly options
+          # Run dependency-check with offline mode (skip NVD updates)
           /opt/dependency-check/bin/dependency-check.sh \
             --scan . \
             --project "devsecops-app" \
@@ -252,10 +252,9 @@ jobs:
             --out /home/ubuntu/app/reports/dependency-check \
             --data /home/ubuntu/dependency-db \
             --failOnCVSS 0 \
-            --updateFixedCve false \
-            --updateHttp false \
-            --updateCache false \
-            --enableExperimental || echo "⚠️ Dependency Check scan completed (offline mode)"
+            --noupdate \
+            --enableExperimental \
+            --prettyPrint || echo "⚠️ Dependency Check completed"
           echo "========================"
           echo "Dependency Check Reports:"
           ls -lah /home/ubuntu/app/reports/dependency-check || echo "❌ No reports directory"
