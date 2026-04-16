@@ -264,16 +264,21 @@ jobs:
           echo "========================"
 
           mkdir -p /home/ubuntu/dependency-db
+          mkdir -p reports/dependency-check
 
           /opt/dependency-check/bin/dependency-check.sh \
             --scan . \
-            --format ALL \
+            --project "devsecops-app" \
+            --format HTML \
+            --format JSON \
             --out reports/dependency-check \
             --data /home/ubuntu/dependency-db \
             --nvdApiKey ${{ secrets.NVD_API_KEY }} \
+            --enableExperimental \
             --failOnCVSS 0 || true
 
-          ls -R reports
+          echo "Dependency Check Reports:"
+          ls -lah reports/dependency-check
           EOF
 
 
@@ -322,19 +327,36 @@ jobs:
             ghcr.io/zaproxy/zaproxy:stable \
             zap-baseline.py \
             -t http://localhost:5173 \
-            -r /zap/wrk/zap/zap-report.html \
-            -x /zap/wrk/zap/zap-report.xml \
-            -J /zap/wrk/zap/zap-report.json \
+            -r /zap/wrk/zap-report.html \
+            -x /zap/wrk/zap-report.xml \
+            -J /zap/wrk/zap-report.json \
             --auto || true
 
+          echo "ZAP Reports:"
           ls -lah reports/zap
           EOF
 
 
       - name: Debug Reports
         run: |
-          ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP "ls -R /home/ubuntu/app/reports"
+          ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP << 'EOF'
+            echo "========================"
+            echo "VERIFY FINAL REPORTS"
+            echo "========================"
 
+            echo "FULL REPORT STRUCTURE:"
+            ls -R /home/ubuntu/app/reports
+
+            echo "------------------------"
+            echo "DEPENDENCY CHECK REPORTS"
+            echo "------------------------"
+            ls -lah /home/ubuntu/app/reports/dependency-check || true
+
+            echo "------------------------"
+            echo "ZAP REPORTS"
+            echo "------------------------"
+            ls -lah /home/ubuntu/app/reports || true
+          EOF
 
       - name: Fetch Reports
         run: |
