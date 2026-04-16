@@ -272,7 +272,6 @@ jobs:
             --format HTML \
             --out /home/ubuntu/app/reports/dependency-check \
             --data /home/ubuntu/dependency-db \
-            --noupdate \
             --failOnCVSS 0 || true
 
           echo "Dependency Check Reports:"
@@ -321,13 +320,14 @@ jobs:
           echo "========================"
 
           docker run --rm \
+            -w /zap/wrk \
             -v /home/ubuntu/app/reports:/zap/wrk \
             ghcr.io/zaproxy/zaproxy:stable \
             zap-baseline.py \
             -t http://$EC2_IP:5173 \
-            -r /zap/wrk/zap/zap-report.html \
-            -x /zap/wrk/zap/zap-report.xml \
-            -J /zap/wrk/zap/zap-report.json \
+            -r zap/zap-report.html \
+            -x zap/zap-report.xml \
+            -J zap/zap-report.json \
             --auto || true
 
           echo "ZAP Reports:"
