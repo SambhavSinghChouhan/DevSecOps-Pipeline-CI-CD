@@ -152,7 +152,7 @@ jobs:
       # =========================
       - name: Deploy & Scan on EC2
         run: |
-          ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP << 'EOF'
+          ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP "NVD_API_KEY='${{ secrets.NVD_API_KEY }}' bash -s" << 'EOF'
           set -e   # ❗ fail fast (VERY IMPORTANT)
           echo "========================"
           echo "INSTALLING ALL TOOLS"
@@ -173,13 +173,13 @@ jobs:
             sudo apt update -y
             sudo apt install -y trivy
           fi
-          # dependency check (FIXED)
+          # dependency check
           sudo apt install -y openjdk-17-jdk
           if [ ! -d "/opt/dependency-check" ]; then
             cd /opt
             sudo rm -rf dependency-check*
-            sudo wget -q https://github.com/jeremylong/DependencyCheck/releases/download/v8.4.0/dependency-check-8.4.0-release.zip
-            sudo unzip dependency-check-8.4.0-release.zip
+            sudo wget -q https://github.com/jeremylong/DependencyCheck/releases/download/v12.1.0/dependency-check-12.1.0-release.zip
+            sudo unzip dependency-check-12.1.0-release.zip
             # ✅ IMPORTANT: do NOT move if already correct
             if [ -d "dependency-check" ]; then
               sudo mv dependency-check dependency-check-temp || true
@@ -196,10 +196,15 @@ jobs:
           chmod -R 777 /home/ubuntu/dependency-db
           # Initialize DB on first run (allow update for database creation)
           echo "Initializing Dependency-Check database..."
+          NVD_OPTS=""
+          if [ -n "$NVD_API_KEY" ]; then
+            echo "Using provided NVD API key for Dependency-Check updates"
+            NVD_OPTS="--nvdApiKey $NVD_API_KEY"
+          fi
           /opt/dependency-check/bin/dependency-check.sh \
+            --updateonly \
             --data /home/ubuntu/dependency-db \
-            --project "init" \
-            --scan /opt/dependency-check/bin \
+            $NVD_OPTS \
             -f JSON \
             -o /tmp/init-report || echo "Database initialization attempt completed"
           echo "✅ Database directory ready: /home/ubuntu/dependency-db"
@@ -207,7 +212,7 @@ jobs:
           EOF
       - name: SAST Scan (Trivy + OWASP Dependency Check)
         run: |
-          ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP << 'EOF'
+          ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP "NVD_API_KEY='${{ secrets.NVD_API_KEY }}' bash -s" << 'EOF'
           set -e
           mkdir -p /home/ubuntu/app
           cd /home/ubuntu/app
@@ -252,7 +257,12 @@ jobs:
           echo "========================"
           mkdir -p /home/ubuntu/app/reports/dependency-check
           mkdir -p /home/ubuntu/dependency-db
-          # Run dependency-check (allow update, skip if fails)
+          NVD_OPTS=""
+          if [ -n "$NVD_API_KEY" ]; then
+            echo "Using provided NVD API key for Dependency-Check scan"
+            NVD_OPTS="--nvdApiKey $NVD_API_KEY"
+          fi
+          # Run dependency-check (allow update, retry offline if needed)
           echo "Running Dependency-Check scan..."
           if /opt/dependency-check/bin/dependency-check.sh \
             --scan . \
@@ -261,13 +271,13 @@ jobs:
             --format JSON \
             --out /home/ubuntu/app/reports/dependency-check \
             --data /home/ubuntu/dependency-db \
+            $NVD_OPTS \
             --failOnCVSS 0 \
             --enableExperimental \
             --prettyPrint; then
             echo "✅ Dependency Check scan completed successfully"
           else
             echo "⚠️ Dependency Check encountered issues, attempting offline mode..."
-            # Try again with offline mode if first attempt failed
             /opt/dependency-check/bin/dependency-check.sh \
               --scan . \
               --project "devsecops-app" \
@@ -275,6 +285,7 @@ jobs:
               --format JSON \
               --out /home/ubuntu/app/reports/dependency-check \
               --data /home/ubuntu/dependency-db \
+              $NVD_OPTS \
               --failOnCVSS 0 \
               --noupdate \
               --enableExperimental \
