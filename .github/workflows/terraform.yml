@@ -94,6 +94,7 @@ jobs:
       AWS_REGION: ap-south-1
       EC2_IP: ${{ needs.terraform.outputs.ec2_ip }}
       BRANCH: ${{ secrets.BRANCH }}
+      NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
 
     steps:
       - name: Checkout Repo
