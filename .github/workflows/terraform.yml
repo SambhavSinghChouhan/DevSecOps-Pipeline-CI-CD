@@ -81,7 +81,7 @@ jobs:
         if: ${{ github.event.inputs.action == 'destroy' }}
         run: terraform destroy -auto-approve
 
-  deploy-and-scan:
+  deploy-image:
     runs-on: ubuntu-latest
     needs: terraform
     if: ${{ github.event.inputs.action == 'apply' }}
@@ -92,14 +92,11 @@ jobs:
 
     env:
       AWS_REGION: ap-south-1
-      EC2_IP: ${{ needs.terraform.outputs.ec2_ip }}
       BRANCH: ${{ secrets.BRANCH }}
-      NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
 
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
-
 
       - name: Configure AWS (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -114,11 +111,13 @@ jobs:
           else
             git clone -b $BRANCH ${{ secrets.GBLINK }} app
           fi
+
       - name: Login to ECR
         run: |
           ECR_URI=$(aws ecr describe-repositories --query 'repositories[0].repositoryUri' --output text)
           aws ecr get-login-password --region $AWS_REGION \
           | docker login --username AWS --password-stdin $(echo $ECR_URI | cut -d'/' -f1)
+
       - name: Build Docker Image (Smart)
         run: |
           cd app
@@ -127,19 +126,39 @@ jobs:
           else
             docker build -t devsecops-image .
           fi
+
       - name: Push to ECR
         run: |
           ECR_URI=$(aws ecr describe-repositories --query 'repositories[0].repositoryUri' --output text)
           IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | head -n 1)
           docker tag $IMAGE $ECR_URI:latest
           docker push $ECR_URI:latest
+
       - name: Setup SSH
         run: |
           echo "${{ secrets.KEY }}" > key.pem
           chmod 400 key.pem
-      # =========================
-      # CACHE DEPENDENCY-CHECK DATABASE
-      # =========================
+
+  prepare-ec2:
+    runs-on: ubuntu-latest
+    needs: [deploy-image, terraform]
+    if: ${{ github.event.inputs.action == 'apply' }}
+
+    permissions:
+      id-token: write
+      contents: read
+
+    env:
+      AWS_REGION: ap-south-1
+      EC2_IP: ${{ needs.terraform.outputs.ec2_ip }}
+      NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+
+    steps:
+      - name: Setup SSH
+        run: |
+          echo "${{ secrets.KEY }}" > key.pem
+          chmod 400 key.pem
+
       - name: Cache Dependency-Check DB
         uses: actions/cache@v4
         with:
@@ -148,13 +167,11 @@ jobs:
           key: dependency-check-db-${{ runner.os }}-v1
           restore-keys: |
             dependency-check-db-${{ runner.os }}-
-      # =========================
-      # INSTALL TOOLS
-      # =========================
-      - name: Deploy & Scan on EC2
+
+      - name: Install Tools on EC2
         run: |
           ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP "NVD_API_KEY='${{ secrets.NVD_API_KEY }}' bash -s" << 'EOF'
-          set -e   # ❗ fail fast (VERY IMPORTANT)
+          set -e
           echo "========================"
           echo "INSTALLING ALL TOOLS"
           echo "========================"
@@ -163,25 +180,21 @@ jobs:
           sudo systemctl enable docker
           sudo systemctl start docker
           sudo usermod -aG docker ubuntu || true
-          # docker-compose
           sudo curl -SL https://github.com/docker/compose/releases/download/v2.24.6/docker-compose-linux-x86_64 \
             -o /usr/local/bin/docker-compose
           sudo chmod +x /usr/local/bin/docker-compose
-          # trivy
           if ! command -v trivy &> /dev/null; then
             wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
             echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/trivy.list
             sudo apt update -y
             sudo apt install -y trivy
           fi
-          # dependency check
           sudo apt install -y openjdk-17-jdk
           if [ ! -d "/opt/dependency-check" ]; then
             cd /opt
             sudo rm -rf dependency-check*
             sudo wget -q https://github.com/jeremylong/DependencyCheck/releases/download/v12.1.0/dependency-check-12.1.0-release.zip
             sudo unzip dependency-check-12.1.0-release.zip
-            # ✅ IMPORTANT: do NOT move if already correct
             if [ -d "dependency-check" ]; then
               sudo mv dependency-check dependency-check-temp || true
               sudo rm -rf /opt/dependency-check
@@ -192,10 +205,8 @@ jobs:
           docker --version
           trivy --version
           aws --version
-          # Initialize dependency-check database directory
           mkdir -p /home/ubuntu/dependency-db
           chmod -R 777 /home/ubuntu/dependency-db
-          # Initialize DB on first run (allow update for database creation)
           echo "Initializing Dependency-Check database..."
           NVD_OPTS=""
           if [ -n "$NVD_API_KEY" ]; then
@@ -211,6 +222,28 @@ jobs:
           echo "✅ Database directory ready: /home/ubuntu/dependency-db"
           ls -lah /home/ubuntu/dependency-db || echo "DB may need first-time setup"
           EOF
+
+  sast-scan:
+    runs-on: ubuntu-latest
+    needs: [prepare-ec2, terraform]
+    if: ${{ github.event.inputs.action == 'apply' }}
+
+    permissions:
+      id-token: write
+      contents: read
+
+    env:
+      AWS_REGION: ap-south-1
+      EC2_IP: ${{ needs.terraform.outputs.ec2_ip }}
+      BRANCH: ${{ secrets.BRANCH }}
+      NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+
+    steps:
+      - name: Setup SSH
+        run: |
+          echo "${{ secrets.KEY }}" > key.pem
+          chmod 400 key.pem
+
       - name: SAST Scan (Trivy + OWASP Dependency Check)
         run: |
           ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP "NVD_API_KEY='${{ secrets.NVD_API_KEY }}' bash -s" << 'EOF'
@@ -263,7 +296,6 @@ jobs:
             echo "Using provided NVD API key for Dependency-Check scan"
             NVD_OPTS="--nvdApiKey $NVD_API_KEY"
           fi
-          # Run dependency-check (allow update, retry offline if needed)
           echo "Running Dependency-Check scan..."
           if /opt/dependency-check/bin/dependency-check.sh \
             --scan . \
@@ -295,7 +327,6 @@ jobs:
           echo "========================"
           echo "Dependency Check Reports:"
           ls -lah /home/ubuntu/app/reports/dependency-check || echo "❌ No reports directory"
-          # Verify reports were generated
           if [ -f "/home/ubuntu/app/reports/dependency-check/dependency-check-report.html" ]; then
             echo "✅ HTML Report: $(du -sh /home/ubuntu/app/reports/dependency-check/dependency-check-report.html | cut -f1)"
           fi
@@ -303,6 +334,26 @@ jobs:
             echo "✅ JSON Report: $(du -sh /home/ubuntu/app/reports/dependency-check/dependency-check-report.json | cut -f1)"
           fi
           EOF
+
+  deploy-and-zap-scan:
+    runs-on: ubuntu-latest
+    needs: [sast-scan, terraform]
+    if: ${{ github.event.inputs.action == 'apply' }}
+
+    permissions:
+      id-token: write
+      contents: read
+
+    env:
+      EC2_IP: ${{ needs.terraform.outputs.ec2_ip }}
+      WEBSITE_PORT: ${{ secrets.WEBSITE_PORT }}
+
+    steps:
+      - name: Setup SSH
+        run: |
+          echo "${{ secrets.KEY }}" > key.pem
+          chmod 400 key.pem
+
       - name: Deploy + ZAP Scan
         run: |
           ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP << EOF
@@ -327,7 +378,11 @@ jobs:
           echo "========================"
           echo "TEST APP"
           echo "========================"
-          curl -I http://localhost:5173 || echo "App still not reachable"
+          if [ -z "$WEBSITE_PORT" ]; then
+            echo "ERROR: WEBSITE_PORT is not set. Please configure this secret."
+            exit 1
+          fi
+          curl -I http://localhost:$WEBSITE_PORT || echo "App still not reachable"
           mkdir -p reports/zap
           echo "========================"
           echo "ZAP SCAN"
@@ -337,7 +392,7 @@ jobs:
             -v /home/ubuntu/app/reports:/zap/wrk \
             ghcr.io/zaproxy/zaproxy:stable \
             zap-baseline.py \
-            -t http://$EC2_IP:5173 \
+            -t http://$EC2_IP:$WEBSITE_PORT \
             -r zap/zap-report.html \
             -x zap/zap-report.xml \
             -J zap/zap-report.json \
@@ -345,36 +400,30 @@ jobs:
           echo "ZAP Reports:"
           ls -lah /home/ubuntu/app/reports/zap
           EOF
-      - name: Debug Reports
+
+  fetch-reports:
+    runs-on: ubuntu-latest
+    needs: [deploy-and-zap-scan, terraform]
+    if: ${{ github.event.inputs.action == 'apply' }}
+
+    permissions:
+      id-token: write
+      contents: read
+
+    env:
+      EC2_IP: ${{ needs.terraform.outputs.ec2_ip }}
+
+    steps:
+      - name: Setup SSH
         run: |
-          ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP << 'EOF'
-            echo "========================"
-            echo "VERIFY FINAL REPORTS"
-            echo "========================"
-            echo "FULL REPORT STRUCTURE:"
-            ls -R /home/ubuntu/app/reports || echo "❌ Reports directory not found"
-            echo "------------------------"
-            echo "DEPENDENCY CHECK REPORTS"
-            echo "------------------------"
-            if [ -d "/home/ubuntu/app/reports/dependency-check" ]; then
-              ls -lah /home/ubuntu/app/reports/dependency-check
-              echo "Report files found:"
-              find /home/ubuntu/app/reports/dependency-check -type f
-            else
-              echo "❌ dependency-check directory not found"
-              # Create it if missing
-              mkdir -p /home/ubuntu/app/reports/dependency-check
-              echo "✅ Created dependency-check directory"
-            fi
-            echo "------------------------"
-            echo "ZAP REPORTS"
-            echo "------------------------"
-            ls -lah /home/ubuntu/app/reports/zap || echo "ZAP reports not ready yet"
-          EOF
+          echo "${{ secrets.KEY }}" > key.pem
+          chmod 400 key.pem
+
       - name: Fetch Reports
         run: |
           mkdir -p reports
           scp -r -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP:/home/ubuntu/app/reports/* reports/
+
       - name: Upload Reports to GitHub Artifacts
         uses: actions/upload-artifact@v4
         with:
