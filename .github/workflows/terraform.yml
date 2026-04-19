@@ -245,6 +245,16 @@ jobs:
           echo "${{ secrets.KEY }}" > key.pem
           chmod 400 key.pem
 
+      - name: Download Sonar Report
+        uses: actions/download-artifact@v4
+        with:
+          name: sonar-temp
+          path: sonar-report
+
+      - name: Transfer Sonar Report to EC2
+        run: |
+          scp -r -o StrictHostKeyChecking=no -i key.pem sonar-report ubuntu@$EC2_IP:/home/ubuntu/app/reports/
+
       - name: Cache Dependency-Check DB
         uses: actions/cache@v4
         with:
@@ -509,12 +519,6 @@ jobs:
         run: |
           mkdir -p reports
           scp -r -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP:/home/ubuntu/app/reports/* reports/
-
-      - name: Download Sonar Report   # ✅ ADD HERE
-        uses: actions/download-artifact@v4
-        with:
-          name: sonar-temp
-          path: reports/sonar
       
       - name: Upload Reports to GitHub Artifacts
         uses: actions/upload-artifact@v4
