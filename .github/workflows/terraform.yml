@@ -92,7 +92,7 @@ jobs:
 
     env:
       AWS_REGION: ap-south-1
-      BRANCH: ${{ secrets.BRANCH }}
+      BRANCH: ${{ vars.BRANCH }}
 
     steps:
       - name: Checkout Repo
@@ -109,16 +109,16 @@ jobs:
       - name: Clone App
         run: |
           if [ -z "$BRANCH" ]; then
-            git clone ${{ secrets.GBLINK }} app
+            git clone ${{ vars.GBLINK }} app
           else
-            git clone -b $BRANCH ${{ secrets.GBLINK }} app
+            git clone -b $BRANCH ${{ vars.GBLINK }} app
           fi
 
       - name: Generate Project Key
         id: sonar_key
         run: |
-          REPO=$(basename -s .git "${{ secrets.GBLINK }}")
-          OWNER=$(echo "${{ secrets.GBLINK }}" | awk -F'/' '{print $(NF-1)}')
+          REPO=$(basename -s .git "${{ vars.GBLINK }}")
+          OWNER=$(echo "${{ vars.GBLINK }}" | awk -F'/' '{print $(NF-1)}')
           KEY="${OWNER}_${REPO}"
           echo "key=$KEY" >> $GITHUB_OUTPUT
 
@@ -191,8 +191,6 @@ jobs:
           echo "HTML report created"
           ls -lah sonar-report
 
-
-
       - name: Login to ECR
         run: |
           ECR_URI=$(aws ecr describe-repositories --query 'repositories[0].repositoryUri' --output text)
@@ -214,6 +212,13 @@ jobs:
           IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | head -n 1)
           docker tag $IMAGE $ECR_URI:latest
           docker push $ECR_URI:latest
+
+      - name: Upload Sonar Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonar-temp
+          path: sonar-report
+          retention-days: 1
 
       - name: Setup SSH
         run: |
@@ -316,7 +321,7 @@ jobs:
     env:
       AWS_REGION: ap-south-1
       EC2_IP: ${{ needs.terraform.outputs.ec2_ip }}
-      BRANCH: ${{ secrets.BRANCH }}
+      BRANCH: ${{ vars.BRANCH }}
       NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
 
     steps:
@@ -335,7 +340,7 @@ jobs:
           echo "========================"
           echo "CLONING REPO"
           echo "========================"
-          git clone -b ${{ secrets.BRANCH }} ${{ secrets.GBLINK }} .
+          git clone -b ${{ vars.BRANCH }} ${{ vars.GBLINK }} .
           echo "FILES AFTER CLONE:"
           ls -lah
           mkdir -p reports
@@ -427,7 +432,7 @@ jobs:
 
     env:
       EC2_IP: ${{ needs.terraform.outputs.ec2_ip }}
-      WEBSITE_PORT: ${{ secrets.WEBSITE_PORT }}
+      WEBSITE_PORT: ${{ vars.WEBSITE_PORT }}
 
     steps:
       - name: Setup SSH
