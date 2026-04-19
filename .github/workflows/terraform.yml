@@ -133,6 +133,70 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
+      - name: Fetch SonarCloud Report
+        run: |
+          mkdir -p sonar-report
+
+          PROJECT_KEY=${{ steps.sonar_key.outputs.key }}
+
+          echo "Waiting for Sonar analysis..."
+          sleep 20
+
+          echo "Fetching SonarCloud data for $PROJECT_KEY"
+
+          # Issues
+          curl -s -u ${{ secrets.SONAR_TOKEN }}: \
+          "https://sonarcloud.io/api/issues/search?componentKeys=$PROJECT_KEY" \
+          -o sonar-report/issues.json
+
+          # Metrics
+          curl -s -u ${{ secrets.SONAR_TOKEN }}: \
+          "https://sonarcloud.io/api/measures/component?component=$PROJECT_KEY&metricKeys=bugs,vulnerabilities,code_smells,coverage,duplicated_lines_density" \
+          -o sonar-report/metrics.json
+
+          echo "Sonar JSON report downloaded"
+          ls -lah sonar-report
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Convert Sonar JSON to HTML
+        run: |
+          echo "Generating HTML report..."
+
+          echo "<html><head><title>Sonar Report</title>
+          <style>
+          body { font-family: Arial; margin: 20px; }
+          h1 { color: #2c3e50; }
+          table { border-collapse: collapse; width: 100%; }
+          th, td { border: 1px solid #ddd; padding: 8px; }
+          th { background-color: #f4f4f4; }
+          tr:nth-child(even) { background-color: #f9f9f9; }
+          </style>
+          </head><body>" > sonar-report/sonar-report.html
+
+          echo "<h1>SonarCloud Analysis Report</h1>" >> sonar-report/sonar-report.html
+
+          echo "<h2>Metrics Summary</h2><ul>" >> sonar-report/sonar-report.html
+          jq -r '.component.measures[] | "<li><b>\(.metric)</b>: \(.value)</li>"' sonar-report/metrics.json >> sonar-report/sonar-report.html
+          echo "</ul>" >> sonar-report/sonar-report.html
+
+          echo "<h2>Issues</h2>" >> sonar-report/sonar-report.html
+          echo "<table><tr><th>Type</th><th>Severity</th><th>Message</th><th>File</th></tr>" >> sonar-report/sonar-report.html
+
+          jq -r '.issues[] | "<tr><td>\(.type)</td><td>\(.severity)</td><td>\(.message)</td><td>\(.component)</td></tr>"' sonar-report/issues.json >> sonar-report/sonar-report.html
+
+          echo "</table></body></html>" >> sonar-report/sonar-report.html
+
+          echo "HTML report created"
+          ls -lah sonar-report
+
+      - name: Upload Sonar Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonar-report
+          path: sonar-report
+
       - name: Login to ECR
         run: |
           ECR_URI=$(aws ecr describe-repositories --query 'repositories[0].repositoryUri' --output text)
