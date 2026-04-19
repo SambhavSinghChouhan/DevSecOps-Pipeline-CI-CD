@@ -97,6 +97,8 @@ jobs:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Configure AWS (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -112,29 +114,24 @@ jobs:
             git clone -b $BRANCH ${{ secrets.GBLINK }} app
           fi
 
-      - name: SonarCloud Scan
+      - name: Generate Project Key
+        id: sonar_key
         run: |
-          sudo apt-get update
-          sudo apt-get install -y unzip wget
+          REPO=$(basename -s .git "${{ secrets.GBLINK }}")
+          OWNER=$(echo "${{ secrets.GBLINK }}" | awk -F'/' '{print $(NF-1)}')
+          KEY="${OWNER}_${REPO}"
+          echo "key=$KEY" >> $GITHUB_OUTPUT
 
-          echo "Installing Sonar Scanner..."
-          wget -q https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-5.0.1.3006-linux.zip
-          unzip -q sonar-scanner-cli-*.zip
-          export PATH=$PATH:$(pwd)/sonar-scanner-*/bin
-
-          echo "Generating dynamic project key..."
-          PROJECT_KEY=$(echo "${{ secrets.GBLINK }}" | sed 's/[^a-zA-Z0-9]/_/g')
-
-          echo "Project Key: $PROJECT_KEY"
-
-          cd app
-
-          sonar-scanner \
-            -Dsonar.projectKey=$PROJECT_KEY \
-            -Dsonar.organization=${{ secrets.SONAR_ORG }} \
-            -Dsonar.sources=. \
-            -Dsonar.host.url=https://sonarcloud.io \
-            -Dsonar.login=${{ secrets.SONAR_TOKEN }}
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@v2
+        with:
+          projectBaseDir: app
+          args: >
+            -Dsonar.projectKey=${{ steps.sonar_key.outputs.key }}
+            -Dsonar.organization=${{ secrets.SONAR_ORG }}
+            -Dsonar.sources=.
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
       - name: Login to ECR
         run: |
