@@ -191,10 +191,11 @@ jobs:
           echo "HTML report created"
           ls -lah sonar-report
 
-      - name: Upload Sonar Report
+
+      - name: Upload Sonar Temp Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: sonar-report
+          name: sonar-temp
           path: sonar-report
 
       - name: Login to ECR
@@ -509,6 +510,12 @@ jobs:
           mkdir -p reports
           scp -r -o StrictHostKeyChecking=no -i key.pem ubuntu@$EC2_IP:/home/ubuntu/app/reports/* reports/
 
+      - name: Download Sonar Report   # ✅ ADD HERE
+        uses: actions/download-artifact@v4
+        with:
+          name: sonar-temp
+          path: reports/sonar
+      
       - name: Upload Reports to GitHub Artifacts
         uses: actions/upload-artifact@v4
         with:
