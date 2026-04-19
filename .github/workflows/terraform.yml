@@ -192,11 +192,6 @@ jobs:
           ls -lah sonar-report
 
 
-      - name: Upload Sonar Temp Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: sonar-temp
-          path: sonar-report
 
       - name: Login to ECR
         run: |
