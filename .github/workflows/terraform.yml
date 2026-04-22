@@ -134,6 +134,7 @@ jobs:
             echo "project_type=maven" >> $GITHUB_OUTPUT
             echo "Maven project detected"
             mvn clean install -DskipTests
+            echo "SONAR_BINARIES=-Dsonar.java.binaries=target/classes" >> $GITHUB_ENV
 
           # Java - Gradle
           elif [ -f "build.gradle" ]; then
@@ -141,16 +142,19 @@ jobs:
             echo "Gradle project detected"
             chmod +x gradlew || true
             ./gradlew build
+            echo "SONAR_BINARIES=-Dsonar.java.binaries=build/classes" >> $GITHUB_ENV
 
           # Node.js
           elif [ -f "package.json" ]; then
             echo "project_type=nodejs" >> $GITHUB_OUTPUT
             echo "Node.js project detected"
             npm install || true
+            echo "SONAR_BINARIES=" >> $GITHUB_ENV
 
           else
             echo "project_type=none" >> $GITHUB_OUTPUT
             echo "No build needed"
+            echo "SONAR_BINARIES=" >> $GITHUB_ENV
           fi
 
       - name: SonarCloud Scan
@@ -161,7 +165,7 @@ jobs:
             -Dsonar.projectKey=${{ steps.sonar_key.outputs.key }}
             -Dsonar.organization=${{ secrets.SONAR_ORG }}
             -Dsonar.sources=.
-            ${{ steps.build.outputs.project_type == 'maven' && '-Dsonar.java.binaries=target/classes' || steps.build.outputs.project_type == 'gradle' && '-Dsonar.java.binaries=build/classes' || '' }}
+            ${{ env.SONAR_BINARIES }}
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
