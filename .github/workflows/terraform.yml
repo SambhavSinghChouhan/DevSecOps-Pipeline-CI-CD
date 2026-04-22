@@ -122,6 +122,32 @@ jobs:
           KEY="${OWNER}_${REPO}"
           echo "key=$KEY" >> $GITHUB_OUTPUT
 
+      # ✅ NEW STEP: Detect & Build Project Dynamically
+      - name: Detect Project Type & Build
+        run: |
+          cd app
+          echo "Detecting project type..."
+
+          # Java - Maven
+          if [ -f "pom.xml" ]; then
+            echo "Maven project detected"
+            mvn clean install -DskipTests
+
+          # Java - Gradle
+          elif [ -f "build.gradle" ]; then
+            echo "Gradle project detected"
+            chmod +x gradlew || true
+            ./gradlew build
+
+          # Node.js
+          elif [ -f "package.json" ]; then
+            echo "Node.js project detected"
+            npm install || true
+
+          else
+            echo "No build needed"
+          fi
+
       - name: SonarCloud Scan
         uses: SonarSource/sonarcloud-github-action@v2
         with:
@@ -130,6 +156,8 @@ jobs:
             -Dsonar.projectKey=${{ steps.sonar_key.outputs.key }}
             -Dsonar.organization=${{ secrets.SONAR_ORG }}
             -Dsonar.sources=.
+            ${{ hashFiles('app/pom.xml') != '' && '-Dsonar.java.binaries=target/classes' || '' }}
+            ${{ hashFiles('app/build.gradle') != '' && '-Dsonar.java.binaries=build/classes' || '' }}
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
