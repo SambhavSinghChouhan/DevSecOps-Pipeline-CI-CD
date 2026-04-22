@@ -124,27 +124,32 @@ jobs:
 
       # ✅ NEW STEP: Detect & Build Project Dynamically
       - name: Detect Project Type & Build
+        id: build
         run: |
           cd app
           echo "Detecting project type..."
 
           # Java - Maven
           if [ -f "pom.xml" ]; then
+            echo "project_type=maven" >> $GITHUB_OUTPUT
             echo "Maven project detected"
             mvn clean install -DskipTests
 
           # Java - Gradle
           elif [ -f "build.gradle" ]; then
+            echo "project_type=gradle" >> $GITHUB_OUTPUT
             echo "Gradle project detected"
             chmod +x gradlew || true
             ./gradlew build
 
           # Node.js
           elif [ -f "package.json" ]; then
+            echo "project_type=nodejs" >> $GITHUB_OUTPUT
             echo "Node.js project detected"
             npm install || true
 
           else
+            echo "project_type=none" >> $GITHUB_OUTPUT
             echo "No build needed"
           fi
 
@@ -156,8 +161,7 @@ jobs:
             -Dsonar.projectKey=${{ steps.sonar_key.outputs.key }}
             -Dsonar.organization=${{ secrets.SONAR_ORG }}
             -Dsonar.sources=.
-            ${{ hashFiles('app/pom.xml') != '' && '-Dsonar.java.binaries=target/classes' || '' }}
-            ${{ hashFiles('app/build.gradle') != '' && '-Dsonar.java.binaries=build/classes' || '' }}
+            ${{ steps.build.outputs.project_type == 'maven' && '-Dsonar.java.binaries=target/classes' || steps.build.outputs.project_type == 'gradle' && '-Dsonar.java.binaries=build/classes' || '' }}
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
