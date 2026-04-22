@@ -134,7 +134,6 @@ jobs:
             echo "project_type=maven" >> $GITHUB_OUTPUT
             echo "Maven project detected"
             mvn clean install -DskipTests
-            echo "SONAR_BINARIES=-Dsonar.java.binaries=target/classes" >> $GITHUB_ENV
 
           # Java - Gradle
           elif [ -f "build.gradle" ]; then
@@ -142,19 +141,35 @@ jobs:
             echo "Gradle project detected"
             chmod +x gradlew || true
             ./gradlew build
-            echo "SONAR_BINARIES=-Dsonar.java.binaries=build/classes" >> $GITHUB_ENV
 
           # Node.js
           elif [ -f "package.json" ]; then
             echo "project_type=nodejs" >> $GITHUB_OUTPUT
             echo "Node.js project detected"
             npm install || true
-            echo "SONAR_BINARIES=" >> $GITHUB_ENV
 
           else
             echo "project_type=none" >> $GITHUB_OUTPUT
             echo "No build needed"
-            echo "SONAR_BINARIES=" >> $GITHUB_ENV
+          fi
+
+      - name: Verify & Set Java Binaries Path
+        run: |
+          cd app
+          
+          # Check for Maven binaries
+          if [ -d "target/classes" ]; then
+            echo "SONAR_JAVA_BINARIES=target/classes" >> $GITHUB_ENV
+            echo "✅ Maven binaries found"
+          # Check for Gradle binaries
+          elif [ -d "build/classes/java/main" ]; then
+            echo "SONAR_JAVA_BINARIES=build/classes/java/main" >> $GITHUB_ENV
+            echo "✅ Gradle binaries found"
+          else
+            # Exclude .java files if no binaries found
+            echo "SONAR_JAVA_BINARIES=" >> $GITHUB_ENV
+            echo "SONAR_EXCLUSIONS=**/*.java" >> $GITHUB_ENV
+            echo "⚠️ No compiled classes found, excluding Java files"
           fi
 
       - name: SonarCloud Scan
@@ -165,7 +180,8 @@ jobs:
             -Dsonar.projectKey=${{ steps.sonar_key.outputs.key }}
             -Dsonar.organization=${{ secrets.SONAR_ORG }}
             -Dsonar.sources=.
-            ${{ env.SONAR_BINARIES }}
+            ${{ env.SONAR_JAVA_BINARIES != '' && format('-Dsonar.java.binaries={0}', env.SONAR_JAVA_BINARIES) || '' }}
+            ${{ env.SONAR_EXCLUSIONS != '' && format('-Dsonar.exclusions={0}', env.SONAR_EXCLUSIONS) || '' }}
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
