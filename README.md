@@ -685,5 +685,3 @@ This project is a step towards building **secure, automated, and scalable deploy
 > “Security is not a step, it's a continuous process integrated into DevOps.”
 
 ---
-
-## 🎉 DONE
