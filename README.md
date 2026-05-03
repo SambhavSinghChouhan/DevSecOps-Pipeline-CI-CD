@@ -527,30 +527,29 @@ All reports are available as **GitHub Artifacts**:
 
 ---
 
-## 🖼️ Sample Screenshots (Add Yours)
+## 🖼️ Sample Screenshots 
 
-> ⚠️ Replace the placeholders below with your actual screenshots
 
 ---
 
 ### 🔍 SonarCloud Report
-![Sonar Report](./screenshots/sonar-report.png)
+![Sonar Report](images/sonarcloud.jpeg)
 ---
 
 ### 🛡️ Trivy Scan Report
-![Trivy Report](./screenshots/trivy-report.png)
+![Trivy Report](images/trivy.jpeg)
 ---
 
 ### 📚 Dependency Check Report
-![Dependency Report](./screenshots/dependency-report.png)
+![Dependency Report](images/Dependency-Check.jpeg)
 ---
 
 ### 🌐 ZAP DAST Report
-![ZAP Report](./screenshots/zap-report.png)
+![ZAP Report](images/owasp-zap.jpeg)
 ---
 
 ### 🚀 Deployed Application
-![Deployed App](./screenshots/deployed-app.png)
+![Deployed App](images/running-website.jpeg)
 
 ---
 
