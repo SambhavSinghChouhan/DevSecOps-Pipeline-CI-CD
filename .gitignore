@@ -47,6 +47,9 @@ node_modules/
 # Python (if used later)
 __pycache__/
 *.pyc
+.identifier
+.Identifier
+
 
 # Docker
 *.tar
