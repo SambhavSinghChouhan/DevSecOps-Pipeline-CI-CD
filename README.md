@@ -90,6 +90,8 @@ Unlike traditional pipelines, this system:
 
 ### 🔄 End-to-End Pipeline Architecture
 
+```text
+
 User Input (GitHub URL, Branch, Port)
                 │
                 ▼
@@ -131,6 +133,8 @@ User Input (GitHub URL, Branch, Port)
                 │
                 ▼
      Optional Destroy (Cleanup Infra)
+
+```
 
 ---
 
