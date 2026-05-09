@@ -22,6 +22,7 @@ jobs:
     permissions:
       id-token: write
       contents: write
+      actions: write
 
     env:
       AWS_REGION: ap-south-1
