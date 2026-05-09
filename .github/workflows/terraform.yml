@@ -65,6 +65,19 @@ jobs:
         id: tf
         run: |
           echo "ec2_ip=$(terraform output -raw ec2_public_ip)" >> $GITHUB_OUTPUT
+      
+      - name: Save EC2 IP
+        if: ${{ github.event.inputs.action == 'apply' }}
+        run: |
+          echo "${{ steps.tf.outputs.ec2_ip }}" > ec2_ip.txt
+
+      - name: Upload EC2 IP
+        if: ${{ github.event.inputs.action == 'apply' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ec2-ip
+          path: ec2_ip.txt
+      
       - name: Print EC2 IP
         if: ${{ github.event.inputs.action == 'apply' }}
         run: |
