@@ -67,8 +67,8 @@ jobs:
         run: |
           echo "ec2_ip=$(terraform output -raw ec2_public_ip)" >> $GITHUB_OUTPUT
       
-      - name: Save EC2 IP Variable
-        if: ${{ github.event.inputs.action == 'apply' }}
+
+      - name: Save EC2 IP to File
         run: |
           mkdir -p ec2-data
           echo "${{ steps.tf.outputs.ec2_ip }}" > ec2-data/ec2_ip.txt
