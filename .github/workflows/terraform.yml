@@ -68,13 +68,18 @@ jobs:
           echo "ec2_ip=$(terraform output -raw ec2_public_ip)" >> $GITHUB_OUTPUT
       
       - name: Save EC2 IP Variable
+        if: ${{ github.event.inputs.action == 'apply' }}
         run: |
-         curl -L \
+          EC2_IP="${{ steps.tf.outputs.ec2_ip }}"
+
+          echo $EC2_IP
+
+          curl -L \
             -X PATCH \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${{ github.token }}" \
             https://api.github.com/repos/${{ github.repository }}/actions/variables/EC2_IP \
-            -d "{\"name\":\"EC2_IP\",\"value\":\"${{ steps.tf.outputs.ec2_ip }}\"}"
+            -d "{\"name\":\"EC2_IP\",\"value\":\"$EC2_IP\"}"
       
       - name: Print EC2 IP
         if: ${{ github.event.inputs.action == 'apply' }}
