@@ -72,7 +72,7 @@ jobs:
          curl -L \
             -X PATCH \
             -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Authorization: Bearer ${{ github.token }}" \
             https://api.github.com/repos/${{ github.repository }}/actions/variables/EC2_IP \
             -d "{\"name\":\"EC2_IP\",\"value\":\"${{ steps.tf.outputs.ec2_ip }}\"}"
       
