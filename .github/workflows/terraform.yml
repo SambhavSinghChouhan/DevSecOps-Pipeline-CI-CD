@@ -529,7 +529,7 @@ jobs:
           echo "========================"
           docker ps -a
           echo "Waiting for app..."
-          sleep 120
+          sleep 20
           echo "========================"
           echo "TEST APP"
           echo "========================"
