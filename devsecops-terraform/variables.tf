@@ -22,6 +22,3 @@ variable "ecr_repo_name" {
   default = "devsecops-repo"
 }
 
-variable "bucket_name" {
-  default = "devsecops-reports-bucket-12345"
-}
