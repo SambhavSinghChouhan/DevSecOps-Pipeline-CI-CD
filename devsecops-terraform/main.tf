@@ -23,5 +23,4 @@ module "ec2" {
   vpc_id    = module.vpc.vpc_id
 
   ecr_url   = module.ecr.repository_url
-  bucket    = module.s3.bucket_name
 }
