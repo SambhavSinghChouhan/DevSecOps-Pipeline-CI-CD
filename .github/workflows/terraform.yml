@@ -369,7 +369,7 @@ jobs:
             NVD_OPTS="--nvdApiKey $NVD_API_KEY"
           fi
           /opt/dependency-check/bin/dependency-check.sh \
-            --noupdate \
+            --updateonly \
             --data /home/ubuntu/dependency-db \
             $NVD_OPTS \
             -f JSON \
@@ -454,7 +454,6 @@ jobs:
           echo "Running Dependency-Check scan..."
           if /opt/dependency-check/bin/dependency-check.sh \
             --scan . \
-            --noupdate \
             --project "devsecops-app" \
             --format HTML \
             --format JSON \
